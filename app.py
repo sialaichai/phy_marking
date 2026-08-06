@@ -2,93 +2,130 @@ import streamlit as st
 import database as db
 import grading
 from PIL import Image
+import io
 
+# ---- Page config ----
 st.set_page_config(page_title="Smart Marking App", layout="centered")
 
-# Initialise database
+# ---- Initialise Supabase tables and default accounts ----
 db.init_db()
 
-# Simple session state for role
-if "role" not in st.session_state:
-    st.session_state.role = None
+# ---- Login / session management ----
+if "user" not in st.session_state:
+    st.title("🔐 Smart Marking App – Login")
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            user = db.authenticate(username, password)
+            if user:
+                st.session_state.user = user
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
+    with col2:
+        st.markdown("**Default accounts:**")
+        st.code("Teacher: teacher / teacher123\nStudent: student / student123")
+    st.stop()   # Stop execution until logged in
 
-st.sidebar.title("📚 Smart Marking")
-role = st.sidebar.radio("I am a:", ["Teacher", "Student"])
-st.session_state.role = role
+# ---- User is logged in ----
+user = st.session_state.user
+role = user["role"]
+user_id = user["id"]
 
-if role == "Teacher":
+# ---- Sidebar ----
+st.sidebar.title(f"👋 Welcome, {user['username']}")
+st.sidebar.markdown(f"**Role:** {role.capitalize()}")
+if st.sidebar.button("🚪 Logout"):
+    del st.session_state.user
+    st.rerun()
+
+st.sidebar.divider()
+if role == "teacher":
     st.sidebar.markdown("### Teacher Dashboard")
     page = st.sidebar.radio("Go to:", ["Upload Mark Scheme", "View Submissions"])
 else:
     st.sidebar.markdown("### Student Dashboard")
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
-# ---- TEACHER: Upload Mark Scheme ----
-if role == "Teacher" and page == "Upload Mark Scheme":
+# ========================================================
+#                    TEACHER PAGES
+# ========================================================
+if role == "teacher" and page == "Upload Mark Scheme":
     st.header("📤 Upload a New Mark Scheme")
     with st.form("mark_scheme_form"):
-        assignment_name = st.text_input("Assignment Name")
-        question = st.text_area("Question")
-        rubric = st.text_area("Marking Rubric / Expected Answer")
+        assignment_name = st.text_input("Assignment Name", placeholder="e.g., Math Quiz 1")
+        question = st.text_area("Question", placeholder="Write the question here.")
+        rubric = st.text_area("Marking Rubric / Expected Answer", 
+                              placeholder="Describe what a good answer should include.")
         total_points = st.number_input("Total Points", min_value=1, max_value=100, value=10)
-        submitted = st.form_submit_button("Save Mark Scheme")
+        submitted = st.form_submit_button("💾 Save Mark Scheme")
         if submitted:
             if not assignment_name or not question or not rubric:
                 st.error("All fields are required.")
             else:
-                scheme_id = db.add_mark_scheme(1, assignment_name, question, rubric, total_points)
-                st.success(f"✅ Mark scheme saved! ID: {scheme_id}")
+                scheme_id = db.add_mark_scheme(user_id, assignment_name, question, rubric, total_points)
+                if scheme_id:
+                    st.success(f"✅ Mark scheme saved! ID: {scheme_id}")
+                else:
+                    st.error("Failed to save. Check logs.")
 
-    st.subheader("📋 Existing Mark Schemes")
+    # Show existing schemes
+    st.subheader("📋 Your Existing Mark Schemes")
     schemes = db.get_all_mark_schemes()
-    if schemes:
-        for s in schemes:
-            st.write(f"**{s[1]}** (ID: {s[0]}) — {s[4]} points")
+    # Filter by this teacher (since we might have multiple teachers later)
+    teacher_schemes = [s for s in schemes if s["teacher_id"] == user_id]
+    if teacher_schemes:
+        for s in teacher_schemes:
+            st.write(f"**{s['assignment_name']}** (ID: {s['id']}) — {s['total_points']} points")
             with st.expander("View details"):
-                st.write(f"**Question:** {s[2]}")
-                st.write(f"**Rubric:** {s[3]}")
+                st.write(f"**Question:** {s['question']}")
+                st.write(f"**Rubric:** {s['rubric']}")
     else:
-        st.info("No mark schemes uploaded yet.")
+        st.info("You haven't uploaded any mark schemes yet.")
 
-# ---- TEACHER: View Submissions ----
-elif role == "Teacher" and page == "View Submissions":
+elif role == "teacher" and page == "View Submissions":
     st.header("📊 View Student Submissions")
     schemes = db.get_all_mark_schemes()
-    if not schemes:
-        st.warning("No mark schemes available.")
+    teacher_schemes = [s for s in schemes if s["teacher_id"] == user_id]
+    if not teacher_schemes:
+        st.warning("You have no mark schemes. Please upload one first.")
     else:
-        scheme_choices = {f"{s[1]} (ID: {s[0]})": s[0] for s in schemes}
-        selected_label = st.selectbox("Select an assignment", list(scheme_choices.keys()))
-        scheme_id = scheme_choices[selected_label]
+        scheme_options = {f"{s['assignment_name']} (ID: {s['id']})": s["id"] for s in teacher_schemes}
+        selected_label = st.selectbox("Select an assignment", list(scheme_options.keys()))
+        scheme_id = scheme_options[selected_label]
         scheme = db.get_mark_scheme(scheme_id)
         submissions = db.get_submissions_by_scheme(scheme_id)
         if submissions:
             for sub in submissions:
-                st.write(f"**Student:** {sub[1]}  |  **Grade:** {sub[3]}/{scheme[4]}  |  **Feedback:** {sub[4]}")
+                st.write(f"**Student:** {sub['student_name']}  |  **Grade:** {sub['grade']}/{scheme['total_points']}  |  **Feedback:** {sub['feedback']}")
                 with st.expander("See details"):
-                    st.write(f"**Transcribed text:** {sub[2]}")
-                    st.write(f"**Graded at:** {sub[5]}")
+                    st.write(f"**Transcribed text:** {sub['transcribed_text']}")
+                    st.write(f"**Graded at:** {sub['graded_at']}")
         else:
             st.info("No submissions for this assignment yet.")
 
-# ---- STUDENT: Submit Work ----
-elif role == "Student" and page == "Submit Work":
+# ========================================================
+#                    STUDENT PAGES
+# ========================================================
+if role == "student" and page == "Submit Work":
     st.header("📸 Submit Your Work")
+    # Get all mark schemes (from all teachers – you may want to filter by class later)
     schemes = db.get_all_mark_schemes()
     if not schemes:
-        st.warning("No assignments available. Ask your teacher to upload one.")
+        st.warning("No assignments available. Please ask your teacher to upload a mark scheme.")
     else:
-        scheme_choices = {f"{s[1]} (ID: {s[0]})": s[0] for s in schemes}
-        selected_label = st.selectbox("Choose assignment", list(scheme_choices.keys()))
-        scheme_id = scheme_choices[selected_label]
+        scheme_options = {f"{s['assignment_name']} (Teacher: {s['teacher_id']})": s["id"] for s in schemes}
+        selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
+        scheme_id = scheme_options[selected_label]
         scheme = db.get_mark_scheme(scheme_id)
         if scheme:
-            question, rubric, total_points = scheme[2], scheme[3], scheme[4]
-            st.write(f"**Question:** {question}")
-            st.write(f"**Total points:** {total_points}")
+            st.write(f"**Question:** {scheme['question']}")
+            st.write(f"**Total points:** {scheme['total_points']}")
 
-        student_name = st.text_input("Your Name")
-        uploaded_file = st.file_uploader("Take a photo or upload an image", type=["jpg", "jpeg", "png"])
+        student_name = st.text_input("Your Name (as you want it to appear)", placeholder="e.g., John Doe")
+        uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
         if uploaded_file is not None:
             image = Image.open(uploaded_file)
             st.image(image, caption="Your submission", width=300)
@@ -96,30 +133,52 @@ elif role == "Student" and page == "Submit Work":
                 if not student_name:
                     st.error("Please enter your name.")
                 else:
-                    with st.spinner("Grading..."):
+                    with st.spinner("Grading your work..."):
                         img_bytes = uploaded_file.getvalue()
-                        # Set use_real_api=False for demo; change to True when you have API key
+                        # Call grading function (simulated or real)
                         transcribed, grade, feedback = grading.grade_submission(
-                            img_bytes, question, rubric, total_points, use_real_api=False
+                            img_bytes, 
+                            scheme["question"], 
+                            scheme["rubric"], 
+                            scheme["total_points"],
+                            use_real_api=False   # set to True when you have DeepSeek key
                         )
                         db.add_submission(scheme_id, student_name, transcribed, grade, feedback)
-                        st.success(f"✅ Grade: **{grade}/{total_points}**")
+                        st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
                         st.info(f"**Feedback:** {feedback}")
                         st.caption(f"Transcribed text: {transcribed}")
 
-# ---- STUDENT: My Results ----
-elif role == "Student" and page == "My Results":
+elif role == "student" and page == "My Results":
     st.header("📖 My Previous Results")
+    # We'll show all submissions where student_name matches the currently logged‑in student
+    # Since we don't have a unique ID for students yet, we'll ask for their name to filter.
+    # But we can also show a list of all submissions and let the user filter by their name.
+    # For simplicity, we'll show all submissions from all assignments.
     schemes = db.get_all_mark_schemes()
     if not schemes:
-        st.info("No results yet.")
+        st.info("No results available.")
     else:
+        # Show a filter by student name
+        all_subs = []
         for s in schemes:
-            scheme_id = s[0]
-            submissions = db.get_submissions_by_scheme(scheme_id)
-            if submissions:
-                st.subheader(f"Assignment: {s[1]}")
-                for sub in submissions:
-                    st.write(f"**Student:** {sub[1]}  |  **Grade:** {sub[3]}/{s[4]}  |  **Feedback:** {sub[4]}")
+            subs = db.get_submissions_by_scheme(s["id"])
+            all_subs.extend([(s, sub) for sub in subs])
+        if not all_subs:
+            st.info("No submissions have been graded yet.")
+        else:
+            # Let student pick their name from the existing submissions
+            names = sorted(set([sub["student_name"] for _, sub in all_subs]))
+            if names:
+                selected_name = st.selectbox("Select your name", names)
+                # Filter
+                filtered = [(s, sub) for s, sub in all_subs if sub["student_name"] == selected_name]
+                if filtered:
+                    for s, sub in filtered:
+                        st.write(f"**Assignment:** {s['assignment_name']}  |  **Grade:** {sub['grade']}/{s['total_points']}  |  **Feedback:** {sub['feedback']}")
+                        with st.expander("See details"):
+                            st.write(f"**Transcribed text:** {sub['transcribed_text']}")
+                            st.write(f"**Graded at:** {sub['graded_at']}")
+                else:
+                    st.info("No submissions found for that name.")
             else:
-                st.write(f"No submissions for {s[1]}")
+                st.info("No submissions with names yet. Submit some work first.")
