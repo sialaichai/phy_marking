@@ -235,17 +235,30 @@ elif auth_type == "class":
     # ---------- My Results ----------
     elif page == "My Results":
         st.subheader("📖 Your Previous Results")
-        # Show submissions for this class, grouped by assignment
-        supabase = db.get_supabase()
-        schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
-        if not schemes:
-            st.info("No results yet.")
+        student_name_filter = st.text_input("Enter your full name to see your submissions:", value=st.session_state.get("my_name", ""))
+        if not student_name_filter:
+            st.info("Please enter your name above.")
+            # Optional: clear the key if empty
         else:
-            for scheme in schemes:
-                submissions = db.get_submissions_by_scheme(scheme['id'])
-                if submissions:
-                    st.markdown(f"### **{scheme['assignment_name']}**")
-                    for sub in submissions:
-                        st.write(f"- **{sub['student_name']}**: {sub['grade']}/{scheme['total_points']} – {sub['feedback']}")
-                else:
-                    st.write(f"No submissions for {scheme['assignment_name']} yet.")
+            st.session_state["my_name"] = student_name_filter
+            supabase = db.get_supabase()
+            schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
+            if not schemes:
+                st.info("No assignments available.")
+            else:
+                found_any = False
+                for scheme in schemes:
+                    all_subs = db.get_submissions_by_scheme(scheme['id'])
+                    # Filter by student name
+                    my_subs = [s for s in all_subs if s['student_name'].lower() == student_name_filter.lower()]
+                    if my_subs:
+                        found_any = True
+                        st.markdown(f"### **{scheme['assignment_name']}**")
+                        for sub in my_subs:
+                            # Only show score and feedback, not other names
+                            st.write(f"- **Score**: {sub['grade']}/{scheme['total_points']} – **Feedback**: {sub['feedback']}")
+                            with st.expander("See details"):
+                                st.write(f"**Your transcribed text:** {sub['transcribed_text']}")
+                                st.write(f"**Graded at:** {sub['graded_at']}")
+                if not found_any:
+                    st.warning(f"No submissions found for '{student_name_filter}'. Please check your name.")
