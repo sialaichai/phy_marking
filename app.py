@@ -210,6 +210,8 @@ elif auth_type == "class":
                 st.write(f"**Total points:** {scheme['total_points']}")
 
             student_name = st.text_input("Your Full Name (for this submission)")
+            # Inside the submission block, after they enter their name
+            st.session_state["student_name_filter"] = student_name
             uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
             if uploaded_file is not None:
                 image = Image.open(uploaded_file)
