@@ -49,6 +49,39 @@ else:
     st.sidebar.markdown("### Student Dashboard")
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results", "Change Password"])
 
+
+# ========================================================
+#                    CHANGE PASSWORD (Shared)
+# ========================================================
+if page == "Change Password":
+    st.header("🔑 Change Your Password")
+    with st.form("change_password_form"):
+        old_password = st.text_input("Current Password", type="password")
+        new_password = st.text_input("New Password", type="password")
+        confirm_password = st.text_input("Confirm New Password", type="password")
+        submitted = st.form_submit_button("Update Password")
+        
+        if submitted:
+            if not old_password or not new_password or not confirm_password:
+                st.error("All fields are required.")
+            elif new_password != confirm_password:
+                st.error("New passwords do not match.")
+            elif len(new_password) < 6:
+                st.error("New password must be at least 6 characters.")
+            else:
+                # Verify old password first
+                if db.authenticate(user["username"], old_password):
+                    # Update to new password
+                    db.update_password(user_id, new_password)
+                    st.success("✅ Password updated successfully! Please log in again.")
+                    # Log them out to force re-login with new password
+                    if st.button("Log out now"):
+                        del st.session_state.user
+                        st.rerun()
+                else:
+                    st.error("❌ Current password is incorrect.")
+
+
 # ========================================================
 #                    TEACHER PAGES
 # ========================================================
