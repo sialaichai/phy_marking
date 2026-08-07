@@ -168,24 +168,28 @@ if role == "student" and page == "Submit Work":
         if uploaded_file is not None:
             image = Image.open(uploaded_file)
             st.image(image, caption="Your submission", width=300)
+            # Inside the student submission block
             if st.button("📨 Submit for Grading"):
                 if not student_name:
                     st.error("Please enter your name.")
                 else:
-                    with st.spinner("Grading your work..."):
+                    with st.spinner("AI teacher is grading your work..."):
                         img_bytes = uploaded_file.getvalue()
-                        # Call grading function (simulated or real)
-                        transcribed, grade, feedback = grading.grade_submission(
+                        
+                        # Use real DeepSeek API
+                        grade, feedback = grading.grade_submission(
                             img_bytes, 
                             scheme["question"], 
                             scheme["rubric"], 
                             scheme["total_points"],
-                            use_real_api=False   # set to True when you have DeepSeek key
+                            use_real_api=True   # Set to True to use DeepSeek
                         )
-                        db.add_submission(scheme_id, student_name, transcribed, grade, feedback)
+                        
+                        # Save to database
+                        db.add_submission(scheme_id, student_name, "Image processed", grade, feedback)
+                        
                         st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
                         st.info(f"**Feedback:** {feedback}")
-                        st.caption(f"Transcribed text: {transcribed}")
 
 elif role == "student" and page == "My Results":
     st.header("📖 My Previous Results")
