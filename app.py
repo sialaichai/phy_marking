@@ -122,7 +122,7 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
     st.header("👨‍🏫 Teacher Dashboard")
 
     # Sidebar navigation
-    page = st.sidebar.radio("Go to:", ["Manage Classes", "Upload Mark Scheme", "View Marks"])
+    page = st.sidebar.radio("Go to:", ["Manage Classes", "Upload Mark Scheme", "View Marks", "Manage Trial Data"])
 
     # ---------- Manage Classes ----------
     if page == "Manage Classes":
@@ -152,6 +152,8 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
             class_name = st.text_input("Class Name (e.g., Physics 101)")
             class_username = st.text_input("Class Username (for student login)")
             class_password = st.text_input("Class Password", type="password")
+            # Add trial option for classes
+            is_trial_class = st.checkbox("This is a trial class (for testing)", value=True)
             if st.form_submit_button("Create Class"):
                 if class_name and class_username and class_password:
                     result = db.create_class(teacher_id, class_name, class_username, class_password)
@@ -179,9 +181,10 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
                 question = st.text_area("Question")
                 rubric = st.text_area("Marking Rubric / Expected Answer")
                 total_points = st.number_input("Total Points", min_value=1, max_value=100, value=10)
+                is_trial = st.checkbox("This is trial data (for testing)", value=True)
                 if st.form_submit_button("Save Scheme"):
                     if assignment_name and question and rubric:
-                        scheme_id = db.add_mark_scheme(teacher_id, class_id, assignment_name, question, rubric, total_points)
+                        scheme_id = db.add_mark_scheme_with_trial(teacher_id, class_id, assignment_name, question, rubric, total_points, is_trial)
                         if scheme_id:
                             st.success(f"Mark scheme saved! ID: {scheme_id}")
                         else:
@@ -192,22 +195,85 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
     # ---------- View Marks ----------
     elif page == "View Marks":
         st.subheader("📊 View Marks by Assignment and Class")
-        schemes = db.get_teacher_mark_schemes(teacher_id)
+        
+        # Toggle to show/hide trial data
+        show_trial = st.checkbox("Show trial data", value=True)
+        schemes = db.get_teacher_mark_schemes_filtered(teacher_id, include_trial=show_trial)
+        
         if not schemes:
-            st.info("No mark schemes uploaded yet.")
+            st.info("No mark schemes found.")
         else:
-            # Group by assignment name (or ID) and show class name
-            # We'll display each scheme with its class and submissions
             for scheme in schemes:
                 class_name = scheme.get('classes', {}).get('class_name', 'Unknown')
-                st.markdown(f"### **{scheme['assignment_name']}** (Class: {class_name})")
+                trial_tag = "🧪 TRIAL" if scheme.get('is_trial', True) else "✅ REAL"
+                st.markdown(f"### **{scheme['assignment_name']}** {trial_tag} (Class: {class_name})")
                 submissions = db.get_submissions_by_scheme(scheme['id'])
                 if submissions:
                     for sub in submissions:
-                        st.write(f"- **{sub['student_name']}**: {sub['grade']}/{scheme['total_points']} – {sub['feedback']}")
+                        sub_trial_tag = "🧪" if sub.get('is_trial', True) else ""
+                        st.write(f"- **{sub['student_name']}** {sub_trial_tag}: {sub['grade']}/{scheme['total_points']} – {sub['feedback']}")
                 else:
                     st.write("No submissions yet.")
 
+    # ---------- Manage Trial Data ----------
+    elif page == "Manage Trial Data":
+        st.subheader("🧹 Manage Trial Data")
+        st.warning("⚠️ This section allows you to delete trial data. These actions are permanent and cannot be undone!")
+        st.info("Trial data is marked with 🧪 and is meant for testing purposes only.")
+        
+        # Get all schemes for this teacher
+        schemes = db.get_teacher_mark_schemes_filtered(teacher_id, include_trial=True)
+        trial_schemes = [s for s in schemes if s.get('is_trial', True)]
+        real_schemes = [s for s in schemes if not s.get('is_trial', False)]
+        
+        if not trial_schemes:
+            st.success("✅ No trial data found. Everything is clean!")
+        else:
+            st.write(f"Found **{len(trial_schemes)}** trial assignments.")
+            
+            # Option 1: Delete submissions for a specific scheme
+            st.subheader("🗑️ Delete Trial Submissions for a Specific Assignment")
+            scheme_options = {f"{s['assignment_name']} (ID: {s['id']})": s['id'] for s in trial_schemes}
+            selected_scheme = st.selectbox("Select trial assignment to clean", list(scheme_options.keys()))
+            scheme_id = scheme_options[selected_scheme]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"🗑️ Delete trial submissions only"):
+                    db.delete_trial_submissions(scheme_id)
+                    st.success("Trial submissions deleted!")
+                    st.rerun()
+            with col2:
+                if st.button(f"⚠️ Delete entire trial assignment (and all submissions)"):
+                    db.delete_trial_mark_scheme(scheme_id)
+                    st.success("Trial assignment deleted!")
+                    st.rerun()
+            
+            # Option 2: Convert trial data to real data
+            st.subheader("🔄 Convert Trial Data to Real Data")
+            st.info("This will mark the assignment and all its submissions as REAL data.")
+            selected_convert = st.selectbox("Select trial assignment to convert", list(scheme_options.keys()), key="convert_select")
+            scheme_id_convert = scheme_options[selected_convert]
+            if st.button("✅ Convert to REAL data"):
+                db.convert_to_real_data(scheme_id_convert)
+                st.success("Assignment converted to REAL data!")
+                st.rerun()
+            
+            # Option 3: Delete all trial data (nuclear option)
+            st.divider()
+            st.subheader("🔥 Delete ALL Trial Data")
+            st.warning("This will delete ALL your trial assignments and their submissions.")
+            
+            confirm = st.checkbox("I understand this is permanent and cannot be undone")
+            if confirm and st.button("⚠️ Delete ALL trial data", type="primary"):
+                db.delete_all_trial_data(teacher_id)
+                st.success("All trial data deleted!")
+                st.rerun()
+        
+        # Show real data summary
+        if real_schemes:
+            st.divider()
+            st.success(f"✅ You have **{len(real_schemes)}** real assignments (not trial).")
 # ========================================================
 #                    STUDENT (CLASS) DASHBOARD
 # ========================================================
