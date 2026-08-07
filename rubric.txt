@@ -1,0 +1,7 @@
+[Total: X marks]
+
+Criteria breakdown (must be strictly followed):
+1. [1 mark] <Specific action/statement> - Award ONLY IF the student explicitly writes/says this.
+2. [2 marks] <Specific action/statement> - Award BOTH marks if fully correct, 1 mark if partially correct because of <reason>.
+3. [1 mark] <Specific action/statement> - NO MARK if <specific error> is present.
+...
