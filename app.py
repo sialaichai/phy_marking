@@ -49,44 +49,70 @@ st.sidebar.divider()
 #                    ADMIN DASHBOARD
 # ========================================================
 if auth_type == "user" and auth_data["role"] == "admin":
+    admin_id = auth_data["id"]
     st.header("👑 Admin Dashboard")
-    st.subheader("Manage Teachers")
-
-    # Create teacher
-    with st.expander("➕ Create New Teacher"):
-        with st.form("create_teacher"):
-            new_username = st.text_input("Teacher username")
-            new_password = st.text_input("Teacher password", type="password")
-            if st.form_submit_button("Create"):
-                if new_username and new_password:
-                    result = db.create_teacher(new_username, new_password)
-                    if result:
-                        st.success(f"Teacher {new_username} created.")
+    page = st.sidebar.radio("Go to:", ["Manage Teachers", "Change Password"])
+    
+    if page == "Manage Teachers":
+        st.subheader("Manage Teachers")
+        with st.expander("➕ Create New Teacher"):
+            with st.form("create_teacher"):
+                new_username = st.text_input("Teacher username")
+                new_password = st.text_input("Teacher password", type="password")
+                if st.form_submit_button("Create"):
+                    if new_username and new_password:
+                        result = db.create_teacher(new_username, new_password)
+                        if result:
+                            st.success(f"Teacher {new_username} created.")
+                            st.rerun()
+                        else:
+                            st.error("Username may already exist.")
+                    else:
+                        st.error("Both fields required.")
+        teachers = db.get_all_teachers()
+        if teachers:
+            for t in teachers:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                col1.write(f"**{t['username']}** (ID: {t['id']})")
+                if col2.button("Reset Password", key=f"reset_{t['id']}"):
+                    new_pw = st.text_input(f"New password for {t['username']}", key=f"pw_{t['id']}", type="password")
+                    if new_pw and len(new_pw) >= 6:
+                        db.reset_teacher_password(t['id'], new_pw)
+                        st.success("Password updated.")
+                        st.rerun()
+                if col3.button("Delete", key=f"del_{t['id']}"):
+                    db.delete_teacher(t['id'])
+                    st.success("Teacher deleted.")
+                    st.rerun()
+        else:
+            st.info("No teachers yet.")
+    
+    elif page == "Change Password":
+        st.subheader("🔑 Change Your Admin Password")
+        if "admin_pw_updated" in st.session_state and st.session_state.admin_pw_updated:
+            st.success("✅ Password updated successfully! Please log in again.")
+            del st.session_state.auth
+            del st.session_state.admin_pw_updated
+            st.rerun()
+            st.stop()
+        with st.form("admin_change_pw"):
+            old_password = st.text_input("Current Password", type="password")
+            new_password = st.text_input("New Password", type="password")
+            confirm_password = st.text_input("Confirm New Password", type="password")
+            if st.form_submit_button("Update Password"):
+                if not old_password or not new_password or not confirm_password:
+                    st.error("All fields are required.")
+                elif new_password != confirm_password:
+                    st.error("New passwords do not match.")
+                elif len(new_password) < 6:
+                    st.error("New password must be at least 6 characters.")
+                else:
+                    if db.authenticate(auth_data["username"], old_password):
+                        db.update_user_password(admin_id, new_password)
+                        st.session_state.admin_pw_updated = True
                         st.rerun()
                     else:
-                        st.error("Username may already exist.")
-                else:
-                    st.error("Both fields required.")
-
-    # List teachers
-    teachers = db.get_all_teachers()
-    if teachers:
-        for t in teachers:
-            col1, col2, col3 = st.columns([3, 2, 2])
-            col1.write(f"**{t['username']}** (ID: {t['id']})")
-            if col2.button("Reset Password", key=f"reset_{t['id']}"):
-                # simple prompt in Streamlit
-                new_pw = st.text_input(f"New password for {t['username']}", key=f"pw_{t['id']}", type="password")
-                if new_pw and len(new_pw) >= 6:
-                    db.reset_teacher_password(t['id'], new_pw)
-                    st.success("Password updated.")
-                    st.rerun()
-            if col3.button("Delete", key=f"del_{t['id']}"):
-                db.delete_teacher(t['id'])
-                st.success("Teacher deleted.")
-                st.rerun()
-    else:
-        st.info("No teachers yet.")
+                        st.error("❌ Current password is incorrect.")
 
 # ========================================================
 #                    TEACHER DASHBOARD
