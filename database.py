@@ -4,7 +4,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # ---- Supabase client ----
 def get_supabase() -> Client:
-    url = st.secrets["supabase_url"]
+    # Strip any accidental trailing slash from the URL
+    url = st.secrets["supabase_url"].rstrip('/')
     key = st.secrets["supabase_anon_key"]
     return create_client(url, key)
 
