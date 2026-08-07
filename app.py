@@ -44,10 +44,10 @@ if st.sidebar.button("🚪 Logout"):
 st.sidebar.divider()
 if role == "teacher":
     st.sidebar.markdown("### Teacher Dashboard")
-    page = st.sidebar.radio("Go to:", ["Upload Mark Scheme", "View Submissions"])
+    page = st.sidebar.radio("Go to:", ["Upload Mark Scheme", "View Submissions", "Change Password"])
 else:
     st.sidebar.markdown("### Student Dashboard")
-    page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
+    page = st.sidebar.radio("Go to:", ["Submit Work", "My Results", "Change Password"])
 
 # ========================================================
 #                    TEACHER PAGES
