@@ -145,3 +145,71 @@ def update_user_password(user_id: int, new_password: str):
     hashed = generate_password_hash(new_password)
     result = supabase.table("users").update({"password_hash": hashed}).eq("id", user_id).execute()
     return result.data
+
+# ---- Trial data management ----
+def add_mark_scheme_with_trial(teacher_id: int, class_id: int, assignment_name: str, question: str, rubric: str, total_points: int, is_trial: bool = True):
+    supabase = get_supabase()
+    data = {
+        "teacher_id": teacher_id,
+        "class_id": class_id,
+        "assignment_name": assignment_name,
+        "question": question,
+        "rubric": rubric,
+        "total_points": total_points,
+        "is_trial": is_trial
+    }
+    result = supabase.table("mark_schemes").insert(data).execute()
+    return result.data[0]["id"] if result.data else None
+
+def get_teacher_mark_schemes_filtered(teacher_id: int, include_trial: bool = True):
+    supabase = get_supabase()
+    query = supabase.table("mark_schemes").select("*, classes(class_name)").eq("teacher_id", teacher_id)
+    if not include_trial:
+        query = query.eq("is_trial", False)
+    result = query.order("created_at", desc=True).execute()
+    return result.data
+
+def add_submission_with_trial(mark_scheme_id: int, student_name: str, transcribed_text: str, grade: int, feedback: str, is_trial: bool = True):
+    supabase = get_supabase()
+    data = {
+        "mark_scheme_id": mark_scheme_id,
+        "student_name": student_name,
+        "transcribed_text": transcribed_text,
+        "grade": grade,
+        "feedback": feedback,
+        "is_trial": is_trial
+    }
+    result = supabase.table("submissions").insert(data).execute()
+    return result.data[0]["id"] if result.data else None
+
+def delete_trial_submissions(scheme_id: int):
+    supabase = get_supabase()
+    supabase.table("submissions").delete().eq("mark_scheme_id", scheme_id).eq("is_trial", True).execute()
+
+def delete_trial_mark_scheme(scheme_id: int):
+    supabase = get_supabase()
+    # First delete trial submissions
+    supabase.table("submissions").delete().eq("mark_scheme_id", scheme_id).eq("is_trial", True).execute()
+    # Then delete the mark scheme itself (only if it's trial data)
+    supabase.table("mark_schemes").delete().eq("id", scheme_id).eq("is_trial", True).execute()
+
+def delete_all_trial_data(teacher_id: int):
+    supabase = get_supabase()
+    # Get all trial mark schemes for this teacher
+    trial_schemes = supabase.table("mark_schemes").select("id").eq("teacher_id", teacher_id).eq("is_trial", True).execute()
+    if trial_schemes.data:
+        scheme_ids = [s["id"] for s in trial_schemes.data]
+        # Delete trial submissions for these schemes
+        for scheme_id in scheme_ids:
+            supabase.table("submissions").delete().eq("mark_scheme_id", scheme_id).eq("is_trial", True).execute()
+        # Delete trial mark schemes
+        supabase.table("mark_schemes").delete().eq("teacher_id", teacher_id).eq("is_trial", True).execute()
+    # Also delete trial classes (optional)
+    # supabase.table("classes").delete().eq("teacher_id", teacher_id).eq("is_trial", True).execute()
+
+def convert_to_real_data(scheme_id: int):
+    supabase = get_supabase()
+    # Mark the scheme as real
+    supabase.table("mark_schemes").update({"is_trial": False}).eq("id", scheme_id).execute()
+    # Mark all its submissions as real
+    supabase.table("submissions").update({"is_trial": False}).eq("mark_scheme_id", scheme_id).execute()
