@@ -87,3 +87,10 @@ def get_submissions_by_scheme(scheme_id):
     supabase = get_supabase()
     result = supabase.table("submissions").select("*").eq("mark_scheme_id", scheme_id).order("graded_at", desc=True).execute()
     return result.data
+
+# ---- Update user password ----
+def update_password(user_id: int, new_password: str):
+    supabase = get_supabase()
+    hashed = generate_password_hash(new_password)
+    result = supabase.table("users").update({"password_hash": hashed}).eq("id", user_id).execute()
+    return result.data
