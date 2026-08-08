@@ -490,21 +490,72 @@ elif auth_type == "class":
                 if scheme:
                     st.info(f"**Question:** {scheme['question']}")
                     st.write(f"**Total points:** {scheme['total_points']}")
-
+    
+                # ---- CUSTOM CSS FOR LARGER CAMERA ----
+                st.markdown("""
+                <style>
+                    /* Make camera input larger on mobile */
+                    .stCameraInput {
+                        width: 100% !important;
+                        min-height: 400px !important;
+                    }
+                    .stCameraInput video {
+                        width: 100% !important;
+                        height: auto !important;
+                        min-height: 400px !important;
+                        object-fit: cover !important;
+                    }
+                    .stCameraInput div {
+                        width: 100% !important;
+                    }
+                    .stCameraInput button {
+                        font-size: 20px !important;
+                        padding: 15px 30px !important;
+                    }
+                    /* Full-width camera container */
+                    .stCameraInput > div {
+                        width: 100% !important;
+                        max-width: 100% !important;
+                    }
+                    /* On mobile, make camera even larger */
+                    @media (max-width: 768px) {
+                        .stCameraInput {
+                            min-height: 500px !important;
+                        }
+                        .stCameraInput video {
+                            min-height: 500px !important;
+                        }
+                        .stCameraInput button {
+                            font-size: 24px !important;
+                            padding: 20px 40px !important;
+                        }
+                    }
+                </style>
+                """, unsafe_allow_html=True)
+    
                 # Mobile-friendly form with camera
                 with st.form("submission_form"):
                     student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
                     student_email = st.text_input("Your Email Address (optional)", placeholder="john@example.com")
                     st.caption("📧 If provided, your grade and feedback will be sent to this email address.")
                     
-                    # ---- CAMERA INPUT (Direct camera capture) ----
+                    # ---- CAMERA INPUT (LARGER VERSION) ----
                     st.write("### 📷 Take a photo of your work")
+                    st.write("**Tap the button below to open your camera**")
                     camera_image = st.camera_input(
-                        "Take a photo of your answer",
-                        disabled=False
+                        "",
+                        disabled=False,
+                        key="camera_input_large"
                     )
                     
+                    # Show captured image if available
+                    if camera_image is not None:
+                        image = Image.open(camera_image)
+                        st.image(image, caption="Captured photo", width=300)
+                        st.success("✅ Photo captured! Ready to submit.")
+                    
                     # ---- OR File Upload (fallback) ----
+                    st.write("---")
                     st.write("### 📁 Or upload an image file")
                     uploaded_file = st.file_uploader(
                         "Upload image (JPG/PNG)", 
@@ -512,16 +563,18 @@ elif auth_type == "class":
                         accept_multiple_files=False
                     )
                     
-                    # Show preview of whichever image is available
+                    # Show preview of uploaded image
+                    if uploaded_file is not None:
+                        image = Image.open(uploaded_file)
+                        st.image(image, caption="Uploaded image", width=300)
+                        st.success("✅ Image uploaded! Ready to submit.")
+                    
+                    # Determine which image to submit
                     image_to_submit = None
                     if camera_image is not None:
                         image_to_submit = camera_image
-                        image = Image.open(camera_image)
-                        st.image(image, caption="Captured photo", width=300)
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
-                        image = Image.open(uploaded_file)
-                        st.image(image, caption="Uploaded image", width=300)
                     
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
@@ -619,21 +672,38 @@ elif auth_type == "class":
                                 if overall_feedback:
                                     st.info(f"**Overall Feedback:** {overall_feedback}")
                                 
-                                # Display feedback table using pandas
+                                # Display feedback table with simplified format
                                 if feedback_table and len(feedback_table) > 0:
                                     st.subheader("📊 Detailed Mark Breakdown")
                                     
-                                    # Create dataframe from feedback table
-                                    df = pd.DataFrame(feedback_table)
+                                    # Transform data for display: column 1 = mark, column 2 = rationale + details
+                                    display_data = []
+                                    for row in feedback_table:
+                                        # Get the mark description and rationale
+                                        mark_desc = row.get('mark', 'Unknown')
+                                        rationale = row.get('rationale', 'No rationale provided.')
+                                        display_data.append({
+                                            "Mark": mark_desc,
+                                            "Rationale & Details": rationale
+                                        })
                                     
-                                    # Display as a styled dataframe
+                                    df = pd.DataFrame(display_data)
+                                    
                                     st.dataframe(
                                         df,
                                         use_container_width=True,
                                         hide_index=True,
                                         column_config={
-                                            "mark": "Mark",
-                                            "rationale": "Rationale"
+                                            "Mark": st.column_config.Column(
+                                                "Mark",
+                                                help="The mark/point awarded for this criterion",
+                                                width="small"
+                                            ),
+                                            "Rationale & Details": st.column_config.Column(
+                                                "Rationale & Details",
+                                                help="Detailed explanation of why this mark was awarded or not",
+                                                width="large"
+                                            )
                                         }
                                     )
                                 else:
@@ -648,7 +718,7 @@ elif auth_type == "class":
                                     st.info("💡 No email provided. Your grade is shown above.")
                                 
                                 st.caption("Your grade and feedback are private and only visible to you and your teacher.")
-
+    
     # ---------- My Results ----------
     elif page == "My Results":
         st.subheader("📖 View Your Results")
