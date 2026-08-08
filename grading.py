@@ -74,35 +74,35 @@ def process_image_for_api(image_bytes):
     except Exception as e:
         raise Exception(f"Image processing failed: {str(e)}")
 
-def analyze_image_with_deepseek(image_bytes, prompt_text):
+def call_deepseek_api(image_bytes, prompt_text):
     """
-    Send an image to DeepSeek model for analysis.
+    Send an image and prompt to DeepSeek model.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: DeepSeek API key not found. Please add it to secrets."
     
-    # Step 1: Process and optimize image
+    # Process image
     try:
         processed_bytes = process_image_for_api(image_bytes)
     except Exception as e:
         return f"ERROR: {str(e)}"
     
-    # Step 2: Convert to Base64
+    # Convert to Base64
     try:
         base64_image = base64.b64encode(processed_bytes).decode('utf-8')
     except Exception as e:
         return f"ERROR: Base64 encoding failed: {str(e)}"
     
-    # Step 3: Prepare API request
+    # Prepare API request
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Step 4: Build payload with image as markdown
+    # Build payload with image as markdown
     image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image. ONLY analyze this image for the student's work:\n{image_markdown}"
+    full_prompt = f"{prompt_text}\n\nHere is the image:\n{image_markdown}"
     
     payload = {
         "model": "deepseek-chat",
@@ -116,7 +116,7 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
         "temperature": 0.2
     }
     
-    # Step 5: Send request
+    # Send request
     try:
         response = requests.post(
             url, 
@@ -125,15 +125,14 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
             timeout=60
         )
         
-        # Handle specific error codes
         if response.status_code == 400:
             error_detail = response.json() if response.text else {}
             error_msg = error_detail.get('error', {}).get('message', 'Unknown error')
             return f"ERROR: Bad Request - {error_msg}"
         elif response.status_code == 401:
-            return "ERROR: Invalid API key. Please check your DeepSeek API key in secrets."
+            return "ERROR: Invalid API key."
         elif response.status_code == 429:
-            return "ERROR: Rate limit exceeded. Please wait a few minutes and try again."
+            return "ERROR: Rate limit exceeded. Please wait."
         elif response.status_code == 500:
             return "ERROR: DeepSeek server error. Please try again later."
         
@@ -143,80 +142,122 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
         return result['choices'][0]['message']['content']
         
     except requests.exceptions.Timeout:
-        return "ERROR: Request timed out. Please try again with a smaller image."
+        return "ERROR: Request timed out."
     except requests.exceptions.RequestException as e:
         return f"ERROR: API request failed: {str(e)}"
     except (KeyError, IndexError) as e:
         return f"ERROR: Unexpected API response structure: {str(e)}"
 
+def extract_text_from_image(image_bytes):
+    """
+    Step 1: Extract text from the image using DeepSeek OCR.
+    Returns just the student's text without any rubric context.
+    """
+    prompt = """Extract ALL text from this image. This is a student's handwritten or typed answer.
+
+Rules:
+- ONLY extract text that is actually written in the image.
+- Do NOT add any extra text or commentary.
+- Just return the text you see in the image, exactly as written.
+- If the image contains handwriting, transcribe it as accurately as possible.
+- If the image contains typed text, copy it exactly.
+- Do NOT include any instructions, explanations, or context in your response.
+- Just return the raw text from the image.
+"""
+    
+    response = call_deepseek_api(image_bytes, prompt)
+    
+    if response.startswith("ERROR:"):
+        return "", response
+    
+    # Clean the response
+    # Remove any markdown or code blocks
+    cleaned = response.strip()
+    if "```" in cleaned:
+        cleaned = re.sub(r'```.*?```', '', cleaned, flags=re.DOTALL)
+    
+    return cleaned.strip(), None
+
 def grade_student_submission(image_bytes, question, rubric, total_points):
     """
-    Grade a student's answer using DeepSeek API with clean numeric marks.
+    Step 2: Grade the student's answer using the extracted text.
     """
-    # Construct grading prompt with CLEAR SEPARATION between rubric and student work
-    prompt = f"""You are a strict teacher. Grade the student's answer based ONLY on the rubric provided.
+    # Step 1: Extract text from image
+    student_text, error = extract_text_from_image(image_bytes)
+    
+    if error:
+        return 0, [], f"ERROR: {error}"
+    
+    if not student_text or len(student_text) < 3:
+        return 0, [{"mark": 0, "rationale": "No text could be extracted from the image. Please ensure the handwriting is clear and the image is well-lit."}], "No text extracted from image."
+    
+    # Step 2: Grade the extracted text
+    # Parse the rubric into individual criteria
+    # Simple approach: split by newlines or numbered items
+    criteria = []
+    for line in rubric.split('\n'):
+        line = line.strip()
+        if line and any(c in line for c in ['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '•', '-', '[', '(']):
+            # Try to extract the point value
+            points = 0
+            # Look for [X] or (X) or X marks
+            match = re.search(r'\[(\d+)\]|\((\d+)\)|(\d+)\s*marks?', line)
+            if match:
+                points = int(match.group(1) or match.group(2) or match.group(3) or 0)
+            elif line.startswith(tuple(['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.'])):
+                points = 1
+            else:
+                points = 1
+            
+            criteria.append({
+                "points": points,
+                "description": line
+            })
+    
+    if not criteria:
+        # If no criteria found, treat the whole rubric as one criterion
+        criteria = [{"points": total_points, "description": rubric}]
+    
+    # Step 3: Grade using the extracted text
+    # Use a simpler prompt that ONLY references the student's extracted text
+    grading_prompt = f"""You are a teacher. Grade the student's answer based on the rubric.
 
-**IMPORTANT - READ CAREFULLY:**
-1. The rubric below is the MARKING SCHEME - it's what the teacher expects.
-2. The student's answer is in the ATTACHED IMAGE.
-3. DO NOT use the rubric text as the student's answer. ONLY analyze what's in the image.
+**Student's Answer (extracted from image):**
+"{student_text}"
 
-**Question:**
-{question}
-
-**MARKING RUBRIC (This is the teacher's marking scheme, NOT the student's answer):**
+**Rubric:**
 {rubric}
 
-**Total Points Available:** {total_points}
+**Total Points:** {total_points}
 
-**THE STUDENT'S ANSWER IS IN THE ATTACHED IMAGE. ONLY ANALYZE THE IMAGE CONTENT.**
-
-**Your task:**
-1. Look at the image and read the student's handwriting/typed answer.
-2. Compare what the student wrote against each criterion in the rubric.
-3. Award points based on what the student actually wrote.
-
-**OUTPUT FORMAT - JSON ONLY:**
+**Output JSON ONLY:**
 {{
-    "total_score": <total points awarded out of {total_points}>,
+    "total_score": <number between 0 and {total_points}>,
     "feedback_table": [
         {{
-            "mark": <ONLY THE NUMBER of points awarded for this criterion, e.g., 1, 2, 0>,
-            "rationale": "<Explain specifically what the student wrote and why they got/didn't get this point. Reference the student's actual words from the image.>"
-        }},
-        ... (one entry for each rubric criterion)
+            "mark": <numeric points for this criterion>,
+            "rationale": "<explanation based on what the student wrote>"
+        }}
     ],
-    "overall_feedback": "<Short summary of strengths and areas for improvement>"
+    "overall_feedback": "<summary>"
 }}
 
-**CRITICAL RULES TO PREVENT CONFUSION:**
-- The rubric is NOT the student's answer. It's the marking scheme.
-- Only read the student's answer from the IMAGE.
-- Do NOT repeat the rubric wording in the "mark" field.
-- The "mark" field must contain ONLY a number (e.g., 1, 2, 0).
-- The "rationale" should reference specific things the student actually wrote in the image.
-- If the student wrote something that matches the rubric, award the points and quote what they wrote.
-- If the student didn't write something, explain what was missing.
-- NEVER quote the rubric as if it was the student's answer.
-
-**Example of correct rationale:**
-"Student wrote 'F=ma' which matches the rubric. Awarded 1 point."
-
-**Example of WRONG rationale (DO NOT DO THIS):**
-"The rubric says 'State F=ma' so they get 1 point." - This is wrong because it quotes the rubric instead of the student.
+Rules:
+- The student's answer is quoted above. ONLY refer to what is in the quotes.
+- The rubric is for reference only.
+- For each criterion, compare the student's answer to what the rubric requires.
+- Award points based on what the student wrote.
+- The rationale should reference the student's actual words from the quoted text.
 """
 
-    # Call API
-    response_text = analyze_image_with_deepseek(image_bytes, prompt)
+    response = call_deepseek_api(image_bytes, grading_prompt)
     
-    # Check for errors
-    if response_text.startswith("ERROR:"):
-        return 0, [], f"ERROR: {response_text}"
+    if response.startswith("ERROR:"):
+        return 0, [], f"ERROR: {response}"
     
     # Parse JSON response
     try:
-        # Clean the response (remove markdown code blocks)
-        cleaned_text = response_text.strip()
+        cleaned_text = response.strip()
         if "```json" in cleaned_text:
             cleaned_text = re.search(r"```json\s*(.*?)\s*```", cleaned_text, re.DOTALL)
             if cleaned_text:
@@ -226,7 +267,6 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
             if cleaned_text:
                 cleaned_text = cleaned_text.group(1)
         
-        # Parse JSON
         result = json.loads(cleaned_text)
         total_score = result.get("total_score", 0)
         feedback_table = result.get("feedback_table", [])
@@ -238,29 +278,21 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
         except (ValueError, TypeError):
             total_score = 0
             
-        # Clamp score to valid range
         if total_score < 0:
             total_score = 0
         elif total_score > total_points:
             total_score = total_points
         
-        # Validate and clean feedback_table
+        # Clean feedback_table
         if not feedback_table or not isinstance(feedback_table, list):
-            feedback_table = [
-                {"mark": 0, "rationale": "No detailed breakdown available."}
-            ]
+            feedback_table = [{"mark": 0, "rationale": "No detailed breakdown available."}]
         
-        # Clean each row - ensure mark is numeric ONLY and remove rubric text from rationale
         cleaned_table = []
         for row in feedback_table:
-            # Get the mark value
             mark_val = row.get("mark", 0)
-            
-            # Force clean to numeric only
             if isinstance(mark_val, (int, float)):
                 numeric_mark = mark_val
             elif isinstance(mark_val, str):
-                # Try to extract ONLY the number
                 match = re.search(r'^(\d+(?:\.\d+)?)', mark_val.strip())
                 if match:
                     numeric_mark = float(match.group(1))
@@ -269,27 +301,18 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
             else:
                 numeric_mark = 0
             
-            # Ensure it's an integer or simple decimal
             if numeric_mark == int(numeric_mark):
                 numeric_mark = int(numeric_mark)
             
-            # Get rationale and REMOVE ANY RUBRIC TEXT
             rationale = row.get("rationale", "No rationale provided.")
             
-            # Remove any phrases that reference the rubric as the source
+            # Remove any rubric references
             rationale = re.sub(r'(?:the\s+)?rubric\s+(?:says|states|mentions|indicates|has|requires|asks for)\s+', '', rationale, flags=re.IGNORECASE)
             rationale = re.sub(r'^\s*\d+\s*mark(s?)\s*(?:for|if|when)\s*', '', rationale, flags=re.IGNORECASE)
-            rationale = re.sub(r'(?:according to|based on|as per)\s+(?:the\s+)?rubric\s*', '', rationale, flags=re.IGNORECASE)
             
-            # Remove any quoted text that might be from the rubric
-            # Remove anything inside quotes that looks like rubric text
-            rationale = re.sub(r'"([^"]*)"', lambda m: m.group(1) if len(m.group(1)) < 20 else '', rationale)
-            
-            # If rationale still contains "rubric", remove that part
-            rationale = re.sub(r'[Rr]ubric:\s*', '', rationale)
-            
-            # Clean up extra spaces
-            rationale = ' '.join(rationale.split())
+            # If rationale is just a rubric quote, replace with a generic message
+            if any(phrase in rationale.lower() for phrase in ['rubric says', 'rubric states', 'rubric requires']):
+                rationale = "Awarded based on comparison with rubric criteria."
             
             cleaned_table.append({
                 "mark": numeric_mark,
@@ -303,7 +326,7 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
     except Exception as e:
         return 0, [{"mark": 0, "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
-# ---- Fallback: Simulated grading with table ----
+# ---- Fallback: Simulated grading ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
     keywords = re.findall(r'\b[a-zA-Z]{3,}\b', rubric)[:5]
@@ -315,7 +338,7 @@ def simulate_grade(question, rubric, student_answer, total_points):
         earned = 1 if kw.lower() in student_answer.lower() else 0
         feedback_table.append({
             "mark": earned,
-            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer: '{kw}'"
+            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer."
         })
     
     overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords."
