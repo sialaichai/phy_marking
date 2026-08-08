@@ -4,11 +4,26 @@ import grading
 import email_utils
 from PIL import Image
 import io
+import traceback
 
 st.set_page_config(page_title="Smart Marking App", layout="centered")
-
+st.set_option('deprecation.showfileUploaderEncoding', False)
 # ---- Init DB ----
 db.init_db()
+
+# Try to catch and display errors
+try:
+    # ... rest of your imports and code ...
+    import database as db
+    import grading
+    import email_utils
+    from PIL import Image
+    import io
+except Exception as e:
+    st.error(f"🚨 Import Error: {e}")
+    st.code(traceback.format_exc())
+    st.stop()
+    
 
 # ---- Session state ----
 if "auth" not in st.session_state:
