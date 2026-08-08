@@ -9,6 +9,25 @@ import pandas as pd
 import json
 import re
 
+def extract_numeric_mark(mark_val):
+    """
+    Extract only the numeric value from a mark field.
+    Handles: "1", "2", "0.5", "1 mark", "2 marks", "1/2", "1 out of 2", etc.
+    """
+    if isinstance(mark_val, (int, float)):
+        return str(mark_val)
+    
+    if isinstance(mark_val, str):
+        # Try to extract number from string
+        match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
+        if match:
+            num = float(match.group(1))
+            if num == int(num):
+                return str(int(num))
+            return str(num)
+    
+    return "0"
+
 # ---- Page config ----
 st.set_page_config(
     page_title="Smart Marking App", 
