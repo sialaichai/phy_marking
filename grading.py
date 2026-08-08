@@ -76,7 +76,7 @@ def process_image_for_api(image_bytes):
 
 def analyze_image_with_deepseek(image_bytes, prompt_text):
     """
-    Send an image to DeepSeek-VL model for analysis.
+    Send an image to DeepSeek model for analysis using the correct format.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: DeepSeek API key not found. Please add it to secrets."
@@ -87,38 +87,36 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
     except Exception as e:
         return f"ERROR: {str(e)}"
     
-    # Step 2: Convert to Base64 without any formatting issues
+    # Step 2: Convert to Base64
     try:
         base64_image = base64.b64encode(processed_bytes).decode('utf-8')
     except Exception as e:
         return f"ERROR: Base64 encoding failed: {str(e)}"
     
-    # Step 3: Prepare API request
+    # Step 3: Prepare API request with CORRECT format
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Step 4: Build payload with proper image URL format
+    # Step 4: Build payload - DeepSeek expects images as markdown or text
+    # Alternative approach: Send image as markdown in the text
+    image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
+    
+    # Combine prompt with image markdown
+    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    
     payload = {
         "model": "deepseek-chat",
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
+                "content": full_prompt
             }
         ],
         "max_tokens": 1000,
-        "temperature": 0.2  # Lower = more consistent grading
+        "temperature": 0.2
     }
     
     # Step 5: Send request
