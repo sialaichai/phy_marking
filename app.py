@@ -379,6 +379,12 @@ elif auth_type == "class":
     # ---------- Submit Work ----------
     if page == "Submit Work":
         st.header("📸 Submit Your Work")
+
+        # Add this temporarily to your student submission page to test the API
+        if st.button("🧪 Test DeepSeek API"):
+            result = grading.test_deepseek_api()
+            st.code(result)
+
         
         # Get all mark schemes for this teacher (not just this class)
         supabase = db.get_supabase()
