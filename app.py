@@ -30,109 +30,43 @@ def extract_numeric_mark(mark_val):
     
     return "0"
 
-# ---- Helper function to display feedback table using HTML ----
+# ---- Helper function to display feedback table using Streamlit columns ----
 def display_feedback_table(feedback_table):
     """
-    Display feedback table using HTML to ensure it fits on mobile.
+    Display feedback table using Streamlit's native columns.
+    This ensures it works on all devices without HTML rendering issues.
     """
     if not feedback_table or len(feedback_table) == 0:
         st.caption("No detailed breakdown available.")
         return
     
-    # Build HTML table
-    html = """
-    <style>
-        .feedback-table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
-            font-size: 14px !important;
-            margin: 10px 0 !important;
-        }
-        .feedback-table th {
-            background-color: #4CAF50 !important;
-            color: white !important;
-            font-weight: bold !important;
-            padding: 10px 8px !important;
-            text-align: left !important;
-            border: 1px solid #ddd !important;
-        }
-        .feedback-table td {
-            padding: 10px 8px !important;
-            border: 1px solid #ddd !important;
-            vertical-align: top !important;
-            word-wrap: break-word !important;
-            white-space: normal !important;
-            overflow-wrap: break-word !important;
-            line-height: 1.5 !important;
-        }
-        .feedback-table .mark-col {
-            width: 15% !important;
-            min-width: 40px !important;
-            max-width: 60px !important;
-            text-align: center !important;
-            font-weight: bold !important;
-            background-color: #f5f5f5 !important;
-        }
-        .feedback-table .rationale-col {
-            width: 85% !important;
-            text-align: left !important;
-        }
-        .feedback-table tr:nth-child(even) {
-            background-color: #f9f9f9 !important;
-        }
-        .feedback-table tr:nth-child(odd) {
-            background-color: #ffffff !important;
-        }
-        @media (max-width: 768px) {
-            .feedback-table {
-                font-size: 12px !important;
-            }
-            .feedback-table th, .feedback-table td {
-                padding: 8px 6px !important;
-                font-size: 12px !important;
-            }
-            .feedback-table .mark-col {
-                width: 20% !important;
-                min-width: 30px !important;
-                max-width: 50px !important;
-                font-size: 14px !important;
-            }
-            .feedback-table .rationale-col {
-                width: 80% !important;
-                font-size: 12px !important;
-            }
-        }
-    </style>
-    <table class="feedback-table">
-        <thead>
-            <tr>
-                <th class="mark-col">Mark</th>
-                <th class="rationale-col">Rationale & Details</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    # Create header row
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        st.markdown("**Mark**")
+    with col2:
+        st.markdown("**Rationale & Details**")
     
+    st.divider()
+    
+    # Display each row
     for row in feedback_table:
         mark_val = row.get('mark', 0)
         numeric_mark = extract_numeric_mark(mark_val)
         rationale = row.get('rationale', 'No rationale provided.')
-        # Escape any HTML in rationale
-        rationale = rationale.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        html += f"""
-            <tr>
-                <td class="mark-col">{numeric_mark}</td>
-                <td class="rationale-col">{rationale}</td>
-            </tr>
-        """
-    
-    html += """
-        </tbody>
-    </table>
-    """
-    
-    st.markdown(html, unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            # Center the mark with a subtle background
+            st.markdown(
+                f"<div style='background-color: #f0f0f0; padding: 8px; border-radius: 4px; text-align: center; font-weight: bold;'>{numeric_mark}</div>",
+                unsafe_allow_html=True
+            )
+        with col2:
+            st.markdown(f"<div style='padding: 8px 0;'>{rationale}</div>", unsafe_allow_html=True)
+        
+        # Add a subtle divider between rows
+        st.divider()
 
 # ---- Page config ----
 st.set_page_config(
@@ -224,6 +158,12 @@ st.markdown("""
     }
     .stApp {
         overflow-x: hidden !important;
+    }
+    /* Ensure columns don't overflow */
+    .stColumn {
+        overflow-x: hidden !important;
+        word-wrap: break-word !important;
+        white-space: normal !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -506,7 +446,6 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
                     for class_name, class_subs in classes.items():
                         st.write(f"**📚 Class: {class_name}**")
                         
-                        # Use HTML table for teacher view as well
                         for sub in class_subs:
                             with st.expander(f"📋 {sub['student_name']} – {sub['grade']}/{scheme['total_points']}"):
                                 try:
@@ -516,7 +455,6 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
                                             st.info(f"**Overall:** {feedback_data['overall_feedback']}")
                                         
                                         if 'feedback_table' in feedback_data and feedback_data['feedback_table']:
-                                            # Use the HTML table display function
                                             display_feedback_table(feedback_data['feedback_table'])
                                         else:
                                             st.write(sub['feedback'])
@@ -819,7 +757,7 @@ elif auth_type == "class":
                                 if overall_feedback:
                                     st.info(f"**Overall Feedback:** {overall_feedback}")
                                 
-                                # Use the HTML table display function
+                                # Use the column-based display function
                                 if feedback_table and len(feedback_table) > 0:
                                     st.subheader("📊 Detailed Mark Breakdown")
                                     display_feedback_table(feedback_table)
@@ -827,7 +765,7 @@ elif auth_type == "class":
                                     st.caption("No detailed breakdown available.")
                                 
                                 if email_sent:
-                                    st.success("📧 A copy of your grade has been sent to your email. (Check SPAM folder as well)")
+                                    st.success("📧 A copy of your grade has been sent to your email.")
                                 elif student_email:
                                     st.warning("⚠️ Email could not be sent, but your grade is shown above.")
                                 else:
