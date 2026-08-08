@@ -376,134 +376,124 @@ elif auth_type == "class":
     # Student page options
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
-    # ---------- Submit Work ----------
-    if page == "Submit Work":
-        st.header("📸 Submit Your Work")
-
-        # Add this temporarily to your student submission page to test the API
-        #if st.button("🧪 Test DeepSeek API"):
-         #   result = grading.test_deepseek_api()
-        #    st.code(result)
-
+# ---------- Submit Work ----------
+if page == "Submit Work":
+    st.header("📸 Submit Your Work")
+    
+    # Get all mark schemes for this teacher (not just this class)
+    supabase = db.get_supabase()
+    
+    # First get the teacher_id from the class
+    class_info = supabase.table("classes").select("teacher_id").eq("id", class_id).execute()
+    if not class_info.data:
+        st.error("Class not found.")
+    else:
+        teacher_id_from_class = class_info.data[0]["teacher_id"]
         
-        # Get all mark schemes for this teacher (not just this class)
-        supabase = db.get_supabase()
+        # Now get all mark schemes for this teacher
+        schemes = supabase.table("mark_schemes").select("*").eq("teacher_id", teacher_id_from_class).execute().data
         
-        # First get the teacher_id from the class
-        class_info = supabase.table("classes").select("teacher_id").eq("id", class_id).execute()
-        if not class_info.data:
-            st.error("Class not found.")
+        if not schemes:
+            st.warning("No assignments available from your teacher yet.")
         else:
-            teacher_id_from_class = class_info.data[0]["teacher_id"]
-            
-            # Now get all mark schemes for this teacher (show trial data if present)
-            schemes = supabase.table("mark_schemes").select("*").eq("teacher_id", teacher_id_from_class).execute().data
-            
-            if not schemes:
-                st.warning("No assignments available from your teacher yet.")
-            else:
-                scheme_options = {f"{s['assignment_name']}": s['id'] for s in schemes}
-                selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
-                scheme_id = scheme_options[selected_label]
-                scheme = db.get_mark_scheme(scheme_id)
-                if scheme:
-                    st.info(f"**Question:** {scheme['question']}")
-                    st.write(f"**Total points:** {scheme['total_points']}")
+            scheme_options = {f"{s['assignment_name']}": s['id'] for s in schemes}
+            selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
+            scheme_id = scheme_options[selected_label]
+            scheme = db.get_mark_scheme(scheme_id)
+            if scheme:
+                st.info(f"**Question:** {scheme['question']}")
+                st.write(f"**Total points:** {scheme['total_points']}")
 
-                # Mobile-friendly form with clear submit button
-                with st.form("submission_form"):
-                    student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
-                    student_email = st.text_input("Your Email Address (optional)", placeholder="john@example.com")
-                    st.caption("📧 If provided, your grade and feedback will be sent to this email address.")
-                    
-                    uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
-                    
-                    # Add this in the student submission section, after the uploaded file preview
-                    if uploaded_file is not None:
-                        image = Image.open(uploaded_file)
-                        st.image(image, caption="Your submission", width=300)
-                        
-                        # ---- Test button ----
-                        if st.button("🧪 Test API with this image"):
-                            with st.spinner("Testing API..."):
-                                img_bytes = uploaded_file.getvalue()
-                                result = grading.test_deepseek_api()
-                                st.code(f"API Test: {result}")
-                                
-                                # Test actual image processing
+            # Mobile-friendly form with camera
+            with st.form("submission_form"):
+                student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
+                student_email = st.text_input("Your Email Address (optional)", placeholder="john@example.com")
+                st.caption("📧 If provided, your grade and feedback will be sent to this email address.")
+                
+                # ---- CAMERA INPUT (Direct camera capture) ----
+                st.write("### 📷 Take a photo of your work")
+                camera_image = st.camera_input(
+                    "Take a photo of your answer",
+                    disabled=False
+                )
+                
+                # ---- OR File Upload (fallback) ----
+                st.write("### 📁 Or upload an image file")
+                uploaded_file = st.file_uploader(
+                    "Upload image (JPG/PNG)", 
+                    type=["jpg", "jpeg", "png"],
+                    accept_multiple_files=False
+                )
+                
+                # Show preview of whichever image is available
+                image_to_submit = None
+                if camera_image is not None:
+                    image_to_submit = camera_image
+                    image = Image.open(camera_image)
+                    st.image(image, caption="Captured photo", width=300)
+                elif uploaded_file is not None:
+                    image_to_submit = uploaded_file
+                    image = Image.open(uploaded_file)
+                    st.image(image, caption="Uploaded image", width=300)
+                
+                # ---- SUBMIT BUTTON ----
+                submitted = st.form_submit_button(
+                    "📨 Submit for Grading",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+                if submitted:
+                    # Validation
+                    if not student_name:
+                        st.error("Please enter your name.")
+                    elif image_to_submit is None:
+                        st.error("Please take a photo or upload an image of your work.")
+                    else:
+                        with st.spinner("Grading..."):
+                            # Convert image to bytes
+                            img_bytes = image_to_submit.getvalue()
+                            
+                            # Grade the submission
+                            grade, feedback = grading.grade_submission(
+                                img_bytes, 
+                                scheme["question"], 
+                                scheme["rubric"], 
+                                scheme["total_points"],
+                                use_real_api=True
+                            )
+                            
+                            # Save to database
+                            is_trial = scheme.get('is_trial', True)
+                            
+                            # Try to save with email if provided and valid
+                            email_sent = False
+                            if student_email and email_utils.is_valid_email(student_email):
                                 try:
-                                    processed = grading.process_image_for_api(img_bytes)
-                                    st.success(f"Image processed: {len(processed)} bytes (original: {len(img_bytes)} bytes)")
+                                    db.add_submission(
+                                        scheme_id, 
+                                        class_id,
+                                        student_name, 
+                                        student_email, 
+                                        "Image processed", 
+                                        grade, 
+                                        feedback,
+                                        is_trial=is_trial
+                                    )
+                                    
+                                    # Send email notification
+                                    email_status = email_utils.send_grade_email(
+                                        student_email, 
+                                        student_name, 
+                                        scheme["question"], 
+                                        grade, 
+                                        scheme["total_points"], 
+                                        feedback
+                                    )
+                                    if "sent successfully" in email_status.lower():
+                                        email_sent = True
                                 except Exception as e:
-                                    st.error(f"Image processing error: {e}")
-                    
-                    submitted = st.form_submit_button(
-                        "📨 Submit for Grading",
-                        use_container_width=True,
-                        type="primary"
-                    )
-                    
-                    if submitted:
-                        # Validation
-                        if not student_name:
-                            st.error("Please enter your name.")
-                        elif uploaded_file is None:
-                            st.error("Please upload an image of your work.")
-                        else:
-                            with st.spinner("Grading..."):
-                                img_bytes = uploaded_file.getvalue()
-                                
-                                # Grade the submission
-                                grade, feedback = grading.grade_submission(
-                                    img_bytes, 
-                                    scheme["question"], 
-                                    scheme["rubric"], 
-                                    scheme["total_points"],
-                                    use_real_api=True
-                                )
-                                
-                                # Save to database with class_id
-                                is_trial = scheme.get('is_trial', True)
-                                
-                                # Try to save with email if provided and valid
-                                email_sent = False
-                                if student_email and email_utils.is_valid_email(student_email):
-                                    try:
-                                        db.add_submission(
-                                            scheme_id, 
-                                            class_id,
-                                            student_name, 
-                                            student_email, 
-                                            "Image processed", 
-                                            grade, 
-                                            feedback,
-                                            is_trial=is_trial
-                                        )
-                                        
-                                        # Send email notification
-                                        email_status = email_utils.send_grade_email(
-                                            student_email, 
-                                            student_name, 
-                                            scheme["question"], 
-                                            grade, 
-                                            scheme["total_points"], 
-                                            feedback
-                                        )
-                                        if "sent successfully" in email_status.lower():
-                                            email_sent = True
-                                    except Exception as e:
-                                        # Fallback: save without email
-                                        db.add_submission(
-                                            scheme_id, 
-                                            class_id,
-                                            student_name, 
-                                            "", 
-                                            "Image processed", 
-                                            grade, 
-                                            feedback
-                                        )
-                                else:
-                                    # Save without email
+                                    # Fallback: save without email
                                     db.add_submission(
                                         scheme_id, 
                                         class_id,
@@ -513,19 +503,30 @@ elif auth_type == "class":
                                         grade, 
                                         feedback
                                     )
-                                
-                                # Show success messages
-                                st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
-                                st.info(f"**Feedback:** {feedback}")
-                                
-                                if email_sent:
-                                    st.success("📧 A copy of your grade has been sent to your email.")
-                                elif student_email:
-                                    st.warning("⚠️ Email could not be sent, but your grade is shown above.")
-                                else:
-                                    st.info("💡 No email provided. Your grade is shown above.")
-                                
-                                st.caption("Your grade and feedback are private and only visible to you and your teacher.")
+                            else:
+                                # Save without email
+                                db.add_submission(
+                                    scheme_id, 
+                                    class_id,
+                                    student_name, 
+                                    "", 
+                                    "Image processed", 
+                                    grade, 
+                                    feedback
+                                )
+                            
+                            # Show success messages
+                            st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
+                            st.info(f"**Feedback:** {feedback}")
+                            
+                            if email_sent:
+                                st.success("📧 A copy of your grade has been sent to your email.")
+                            elif student_email:
+                                st.warning("⚠️ Email could not be sent, but your grade is shown above.")
+                            else:
+                                st.info("💡 No email provided. Your grade is shown above.")
+                            
+                            st.caption("Your grade and feedback are private and only visible to you and your teacher.")
 
     # ---------- My Results ----------
     elif page == "My Results":
