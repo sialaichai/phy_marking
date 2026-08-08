@@ -213,3 +213,33 @@ def convert_to_real_data(scheme_id: int):
     supabase.table("mark_schemes").update({"is_trial": False}).eq("id", scheme_id).execute()
     # Mark all its submissions as real
     supabase.table("submissions").update({"is_trial": False}).eq("mark_scheme_id", scheme_id).execute()
+
+# ---- Add submission with email ----
+def add_submission_with_email(mark_scheme_id: int, student_name: str, student_email: str, transcribed_text: str, grade: int, feedback: str, is_trial: bool = True):
+    supabase = get_supabase()
+    data = {
+        "mark_scheme_id": mark_scheme_id,
+        "student_name": student_name,
+        "student_email": student_email,
+        "transcribed_text": transcribed_text,
+        "grade": grade,
+        "feedback": feedback,
+        "is_trial": is_trial
+    }
+    result = supabase.table("submissions").insert(data).execute()
+    return result.data[0]["id"] if result.data else None
+
+# ---- Get submissions by email for a class ----
+def get_submissions_by_email(class_id: int, student_email: str):
+    supabase = get_supabase()
+    # Get all mark schemes for this class
+    schemes = supabase.table("mark_schemes").select("id").eq("class_id", class_id).execute()
+    if not schemes.data:
+        return []
+    scheme_ids = [s["id"] for s in schemes.data]
+    # Get submissions matching the email
+    result = supabase.table("submissions").select("*, mark_schemes(assignment_name, question, total_points)") \
+        .in_("mark_scheme_id", scheme_ids) \
+        .eq("student_email", student_email) \
+        .order("graded_at", desc=True).execute()
+    return result.data
