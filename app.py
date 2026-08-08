@@ -6,28 +6,64 @@ from PIL import Image
 import io
 import traceback
 
-st.set_page_config(page_title="Smart Marking App", layout="centered")
+# ---- Page config ----
+st.set_page_config(
+    page_title="Smart Marking App", 
+    layout="centered",
+    initial_sidebar_state="auto"
+)
+
+# ---- Custom CSS for mobile-friendly UI ----
+st.markdown("""
+<style>
+    /* Make buttons larger and more prominent */
+    .stButton button {
+        width: 100%;
+        background-color: #4CAF50;
+        color: white;
+        font-size: 18px;
+        font-weight: bold;
+        padding: 12px 24px;
+        border-radius: 8px;
+        border: none;
+        margin-top: 10px;
+    }
+    .stButton button:hover {
+        background-color: #45a049;
+        transform: scale(1.02);
+        transition: all 0.3s ease;
+    }
+    /* Danger buttons (delete) */
+    .stButton button[kind="secondary"] {
+        background-color: #f44336;
+    }
+    .stButton button[kind="secondary"]:hover {
+        background-color: #d32f2f;
+    }
+    /* Make form inputs larger for touch */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select {
+        font-size: 16px !important;
+        padding: 12px !important;
+    }
+    /* Mobile responsiveness */
+    @media (max-width: 768px) {
+        .stButton button {
+            font-size: 20px;
+            padding: 15px 30px;
+        }
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+            font-size: 1.5em !important;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ---- Init DB ----
 db.init_db()
 
-# Try to catch and display errors
-try:
-    # ... rest of your imports and code ...
-    import database as db
-    import grading
-    import email_utils
-    from PIL import Image
-    import io
-except Exception as e:
-    st.error(f"🚨 Import Error: {e}")
-    st.code(traceback.format_exc())
-    st.stop()
-    
-
 # ---- Session state ----
 if "auth" not in st.session_state:
-    st.session_state.auth = None   # {"type": "user" or "class", "data": {...}}
+    st.session_state.auth = None
 if "page" not in st.session_state:
     st.session_state.page = "login"
 
@@ -35,17 +71,25 @@ if "page" not in st.session_state:
 if st.session_state.auth is None:
     st.title("🔐 Smart Marking App – Login")
     with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login")
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", placeholder="Enter your password", type="password")
+        submitted = st.form_submit_button(
+            "🔐 Login",
+            use_container_width=True,
+            type="primary"
+        )
         if submitted:
-            auth = db.authenticate(username, password)
-            if auth:
-                st.session_state.auth = auth
-                st.rerun()
+            if not username or not password:
+                st.error("Please enter both username and password.")
             else:
-                st.error("Invalid credentials")
-    st.caption("Demo accounts: admin/admin123, or use a class username/password created by teacher.")
+                auth = db.authenticate(username, password)
+                if auth:
+                    st.session_state.auth = auth
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials")
+    
+    st.caption("Demo accounts: admin/admin123, or use a class username/password created by your teacher.")
     st.stop()
 
 # ---- Extract auth info ----
@@ -55,7 +99,7 @@ auth_data = auth["data"]
 
 # ---- Logout button ----
 st.sidebar.title(f"👋 Welcome, {auth_data.get('username') or auth_data.get('class_name')}")
-if st.sidebar.button("🚪 Logout"):
+if st.sidebar.button("🚪 Logout", use_container_width=True):
     st.session_state.auth = None
     st.rerun()
 
@@ -73,9 +117,14 @@ if auth_type == "user" and auth_data["role"] == "admin":
         st.subheader("Manage Teachers")
         with st.expander("➕ Create New Teacher"):
             with st.form("create_teacher"):
-                new_username = st.text_input("Teacher username")
-                new_password = st.text_input("Teacher password", type="password")
-                if st.form_submit_button("Create"):
+                new_username = st.text_input("Teacher username", placeholder="Enter username")
+                new_password = st.text_input("Teacher password", placeholder="Enter password", type="password")
+                submitted = st.form_submit_button(
+                    "➕ Create Teacher",
+                    use_container_width=True,
+                    type="primary"
+                )
+                if submitted:
                     if new_username and new_password:
                         result = db.create_teacher(new_username, new_password)
                         if result:
@@ -85,6 +134,7 @@ if auth_type == "user" and auth_data["role"] == "admin":
                             st.error("Username may already exist.")
                     else:
                         st.error("Both fields required.")
+        
         teachers = db.get_all_teachers()
         if teachers:
             for t in teachers:
@@ -111,11 +161,17 @@ if auth_type == "user" and auth_data["role"] == "admin":
             del st.session_state.admin_pw_updated
             st.rerun()
             st.stop()
+        
         with st.form("admin_change_pw"):
             old_password = st.text_input("Current Password", type="password")
             new_password = st.text_input("New Password", type="password")
             confirm_password = st.text_input("Confirm New Password", type="password")
-            if st.form_submit_button("Update Password"):
+            submitted = st.form_submit_button(
+                "🔑 Update Password",
+                use_container_width=True,
+                type="primary"
+            )
+            if submitted:
                 if not old_password or not new_password or not confirm_password:
                     st.error("All fields are required.")
                 elif new_password != confirm_password:
@@ -150,12 +206,12 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
                     st.write(f"Class ID: {cls['id']}")
                     # Change password
                     new_pw = st.text_input(f"New password for {cls['class_name']}", key=f"cpw_{cls['id']}", type="password")
-                    if st.button("Update Password", key=f"upd_{cls['id']}"):
+                    if st.button("Update Password", key=f"upd_{cls['id']}", use_container_width=True):
                         if new_pw and len(new_pw) >= 6:
                             db.update_class_password(cls['id'], new_pw)
                             st.success("Password updated.")
                             st.rerun()
-                    if st.button("Delete Class", key=f"delc_{cls['id']}"):
+                    if st.button("Delete Class", key=f"delc_{cls['id']}", use_container_width=True):
                         db.delete_class(cls['id'])
                         st.success("Class deleted.")
                         st.rerun()
@@ -165,12 +221,17 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
         # Create new class
         with st.form("create_class"):
             st.write("### Create a new class")
-            class_name = st.text_input("Class Name (e.g., Physics 101)")
-            class_username = st.text_input("Class Username (for student login)")
-            class_password = st.text_input("Class Password", type="password")
-            # Add trial option for classes
-            is_trial_class = st.checkbox("This is a trial class (for testing)", value=True)
-            if st.form_submit_button("Create Class"):
+            class_name = st.text_input("Class Name (e.g., Physics 101)", placeholder="Enter class name")
+            class_username = st.text_input("Class Username (for student login)", placeholder="Enter username for students")
+            class_password = st.text_input("Class Password", placeholder="Enter password for students", type="password")
+            is_trial_class = st.checkbox("🧪 This is a trial class (for testing)", value=True)
+            
+            submitted = st.form_submit_button(
+                "📚 Create Class",
+                use_container_width=True,
+                type="primary"
+            )
+            if submitted:
                 if class_name and class_username and class_password:
                     result = db.create_class(teacher_id, class_name, class_username, class_password)
                     if result:
@@ -193,12 +254,18 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
             class_id = class_options[selected_class_label]
 
             with st.form("mark_scheme_form"):
-                assignment_name = st.text_input("Assignment Name")
-                question = st.text_area("Question")
-                rubric = st.text_area("Marking Rubric / Expected Answer")
+                assignment_name = st.text_input("Assignment Name", placeholder="e.g., Math Quiz 1")
+                question = st.text_area("Question", placeholder="Write the question here.", height=100)
+                rubric = st.text_area("Marking Rubric / Expected Answer", placeholder="Describe what a good answer should include.", height=150)
                 total_points = st.number_input("Total Points", min_value=1, max_value=100, value=10)
-                is_trial = st.checkbox("This is trial data (for testing)", value=True)
-                if st.form_submit_button("Save Scheme"):
+                is_trial = st.checkbox("🧪 This is trial data (for testing)", value=True)
+                
+                submitted = st.form_submit_button(
+                    "💾 Save Mark Scheme",
+                    use_container_width=True,
+                    type="primary"
+                )
+                if submitted:
                     if assignment_name and question and rubric:
                         scheme_id = db.add_mark_scheme_with_trial(teacher_id, class_id, assignment_name, question, rubric, total_points, is_trial)
                         if scheme_id:
@@ -255,12 +322,12 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
             
             col1, col2 = st.columns(2)
             with col1:
-                if st.button(f"🗑️ Delete trial submissions only"):
+                if st.button("🗑️ Delete trial submissions only", use_container_width=True):
                     db.delete_trial_submissions(scheme_id)
                     st.success("Trial submissions deleted!")
                     st.rerun()
             with col2:
-                if st.button(f"⚠️ Delete entire trial assignment (and all submissions)"):
+                if st.button("⚠️ Delete entire trial assignment", use_container_width=True):
                     db.delete_trial_mark_scheme(scheme_id)
                     st.success("Trial assignment deleted!")
                     st.rerun()
@@ -270,7 +337,7 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
             st.info("This will mark the assignment and all its submissions as REAL data.")
             selected_convert = st.selectbox("Select trial assignment to convert", list(scheme_options.keys()), key="convert_select")
             scheme_id_convert = scheme_options[selected_convert]
-            if st.button("✅ Convert to REAL data"):
+            if st.button("✅ Convert to REAL data", use_container_width=True):
                 db.convert_to_real_data(scheme_id_convert)
                 st.success("Assignment converted to REAL data!")
                 st.rerun()
@@ -281,7 +348,7 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
             st.warning("This will delete ALL your trial assignments and their submissions.")
             
             confirm = st.checkbox("I understand this is permanent and cannot be undone")
-            if confirm and st.button("⚠️ Delete ALL trial data", type="primary"):
+            if confirm and st.button("⚠️ Delete ALL trial data", use_container_width=True, type="primary"):
                 db.delete_all_trial_data(teacher_id)
                 st.success("All trial data deleted!")
                 st.rerun()
@@ -290,6 +357,7 @@ elif auth_type == "user" and auth_data["role"] == "teacher":
         if real_schemes:
             st.divider()
             st.success(f"✅ You have **{len(real_schemes)}** real assignments (not trial).")
+
 # ========================================================
 #                    STUDENT (CLASS) DASHBOARD
 # ========================================================
@@ -301,123 +369,156 @@ elif auth_type == "class":
     # Student page options
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
-# ---------- Submit Work ----------
-elif page == "Submit Work":
-    st.header("📸 Submit Your Work")
-    
-    # Get all mark schemes for this class
-    supabase = db.get_supabase()
-    schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
-    
-    if not schemes:
-        st.warning("No assignments available for this class yet.")
-    else:
-        scheme_options = {f"{s['assignment_name']} (ID: {s['id']})": s['id'] for s in schemes}
-        selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
-        scheme_id = scheme_options[selected_label]
-        scheme = db.get_mark_scheme(scheme_id)
-        if scheme:
-            st.write(f"**Question:** {scheme['question']}")
-            st.write(f"**Total points:** {scheme['total_points']}")
-
-        # Student details
-        student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
-        student_email = st.text_input("Your Email Address", placeholder="john@example.com")
-        st.caption("📧 Your grade and feedback will be sent to this email address.")
+    # ---------- Submit Work ----------
+    if page == "Submit Work":
+        st.header("📸 Submit Your Work")
         
-        uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
+        # Get all mark schemes for this class
+        supabase = db.get_supabase()
+        schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
         
-        if uploaded_file is not None:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Your submission", width=300)
-            
-            if st.button("📨 Submit for Grading"):
-                # Validation
-                if not student_name:
-                    st.error("Please enter your name.")
-                elif not student_email:
-                    st.error("Please enter your email address.")
-                elif not email_utils.is_valid_email(student_email):
-                    st.error("Please enter a valid email address (e.g., name@domain.com).")
-                else:
-                    with st.spinner("Grading..."):
-                        img_bytes = uploaded_file.getvalue()
-                        
-                        # Grade the submission
-                        grade, feedback = grading.grade_submission(
-                            img_bytes, 
-                            scheme["question"], 
-                            scheme["rubric"], 
-                            scheme["total_points"],
-                            use_real_api=True
-                        )
-                        
-                        # Save to database with email
-                        is_trial = scheme.get('is_trial', True)
-                        db.add_submission_with_email(
-                            scheme_id, 
-                            student_name, 
-                            student_email, 
-                            "Image processed", 
-                            grade, 
-                            feedback,
-                            is_trial=is_trial
-                        )
-                        
-                        # Send email notification
-                        email_status = email_utils.send_grade_email(
-                            student_email, 
-                            student_name, 
-                            scheme["question"], 
-                            grade, 
-                            scheme["total_points"], 
-                            feedback
-                        )
-                        
-                        # Show success messages
-                        st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
-                        st.info(f"**Feedback:** {feedback}")
-                        
-                        if "sent successfully" in email_status:
-                            st.success("📧 A copy of your grade has been sent to your email.")
-                        else:
-                            st.warning(f"⚠️ {email_status}")
-                        
-                        st.caption("Your grade and feedback are private and only visible to you and your teacher.")
-
-elif page == "My Results":
-    st.subheader("📖 View Your Results")
-    
-    st.info("Enter your email address to view your own grades and feedback. No other students can see your results.")
-    
-    # Ask student for their email (to view results)
-    view_email = st.text_input("Enter your email address:", type="default")
-    
-    if view_email:
-        if not email_utils.is_valid_email(view_email):
-            st.error("Please enter a valid email address.")
+        if not schemes:
+            st.warning("No assignments available for this class yet.")
         else:
-            # Get submissions for this email in this class
-            submissions = db.get_submissions_by_email(class_id, view_email)
-            
-            if not submissions:
-                st.warning(f"No submissions found for {view_email}. Please check your email or submit some work first.")
-            else:
-                st.success(f"Found {len(submissions)} submission(s) for {view_email}")
+            scheme_options = {f"{s['assignment_name']}": s['id'] for s in schemes}
+            selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
+            scheme_id = scheme_options[selected_label]
+            scheme = db.get_mark_scheme(scheme_id)
+            if scheme:
+                st.info(f"**Question:** {scheme['question']}")
+                st.write(f"**Total points:** {scheme['total_points']}")
+
+            # Mobile-friendly form with clear submit button
+            with st.form("submission_form"):
+                student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
+                student_email = st.text_input("Your Email Address (optional)", placeholder="john@example.com")
+                st.caption("📧 If provided, your grade and feedback will be sent to this email address.")
                 
-                for sub in submissions:
-                    # Get scheme details from the joined data
-                    scheme_data = sub.get('mark_schemes', {})
-                    assignment_name = scheme_data.get('assignment_name', 'Unknown Assignment')
-                    question = scheme_data.get('question', '')
-                    total_points = scheme_data.get('total_points', 0)
+                uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
+                
+                if uploaded_file is not None:
+                    image = Image.open(uploaded_file)
+                    st.image(image, caption="Your submission", width=300)
+                
+                submitted = st.form_submit_button(
+                    "📨 Submit for Grading",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+                if submitted:
+                    # Validation
+                    if not student_name:
+                        st.error("Please enter your name.")
+                    elif uploaded_file is None:
+                        st.error("Please upload an image of your work.")
+                    else:
+                        with st.spinner("Grading..."):
+                            img_bytes = uploaded_file.getvalue()
+                            
+                            # Grade the submission
+                            grade, feedback = grading.grade_submission(
+                                img_bytes, 
+                                scheme["question"], 
+                                scheme["rubric"], 
+                                scheme["total_points"],
+                                use_real_api=True
+                            )
+                            
+                            # Save to database
+                            is_trial = scheme.get('is_trial', True)
+                            
+                            # Try to save with email if provided and valid
+                            email_sent = False
+                            if student_email and email_utils.is_valid_email(student_email):
+                                try:
+                                    db.add_submission_with_email(
+                                        scheme_id, 
+                                        student_name, 
+                                        student_email, 
+                                        "Image processed", 
+                                        grade, 
+                                        feedback,
+                                        is_trial=is_trial
+                                    )
+                                    
+                                    # Send email notification
+                                    email_status = email_utils.send_grade_email(
+                                        student_email, 
+                                        student_name, 
+                                        scheme["question"], 
+                                        grade, 
+                                        scheme["total_points"], 
+                                        feedback
+                                    )
+                                    if "sent successfully" in email_status.lower():
+                                        email_sent = True
+                                except Exception as e:
+                                    # Fallback: save without email
+                                    db.add_submission(
+                                        scheme_id, 
+                                        student_name, 
+                                        "Image processed", 
+                                        grade, 
+                                        feedback
+                                    )
+                            else:
+                                # Save without email
+                                db.add_submission(
+                                    scheme_id, 
+                                    student_name, 
+                                    "Image processed", 
+                                    grade, 
+                                    feedback
+                                )
+                            
+                            # Show success messages
+                            st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
+                            st.info(f"**Feedback:** {feedback}")
+                            
+                            if email_sent:
+                                st.success("📧 A copy of your grade has been sent to your email.")
+                            elif student_email:
+                                st.warning("⚠️ Email could not be sent, but your grade is shown above.")
+                            else:
+                                st.info("💡 No email provided. Your grade is shown above.")
+                            
+                            st.caption("Your grade and feedback are private and only visible to you and your teacher.")
+
+    # ---------- My Results ----------
+    elif page == "My Results":
+        st.subheader("📖 View Your Results")
+        
+        st.info("Enter your email address to view your own grades and feedback. No other students can see your results.")
+        
+        # Ask student for their email (to view results)
+        view_email = st.text_input("Enter your email address:", placeholder="john@example.com")
+        
+        if view_email:
+            if not email_utils.is_valid_email(view_email):
+                st.error("Please enter a valid email address.")
+            else:
+                # Get submissions for this email in this class
+                submissions = db.get_submissions_by_email(class_id, view_email)
+                
+                if not submissions:
+                    st.warning(f"No submissions found for {view_email}. Please check your email or submit some work first.")
+                else:
+                    st.success(f"Found {len(submissions)} submission(s) for {view_email}")
                     
-                    st.markdown(f"### 📝 {assignment_name}")
-                    st.write(f"**Score:** {sub['grade']}/{total_points}")
-                    
-                    with st.expander("📋 View Full Feedback and Question"):
-                        st.write(f"**Question:** {question}")
-                        st.write(f"**Feedback:** {sub['feedback']}")
-                        st.write(f"**Submitted:** {sub['graded_at']}")
-                    
-                    st.divider()
+                    for sub in submissions:
+                        # Get scheme details from the joined data
+                        scheme_data = sub.get('mark_schemes', {})
+                        assignment_name = scheme_data.get('assignment_name', 'Unknown Assignment')
+                        question = scheme_data.get('question', '')
+                        total_points = scheme_data.get('total_points', 0)
+                        
+                        st.markdown(f"### 📝 {assignment_name}")
+                        st.write(f"**Score:** {sub['grade']}/{total_points}")
+                        
+                        with st.expander("📋 View Full Feedback and Question"):
+                            st.write(f"**Question:** {question}")
+                            st.write(f"**Feedback:** {sub['feedback']}")
+                            st.write(f"**Submitted:** {sub['graded_at']}")
+                        
+                        st.divider()
