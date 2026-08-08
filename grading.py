@@ -112,7 +112,7 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
                 "content": full_prompt
             }
         ],
-        "max_tokens": 1500,  # Increased to allow for detailed feedback
+        "max_tokens": 1500,
         "temperature": 0.2
     }
     
@@ -151,8 +151,7 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
 
 def grade_student_submission(image_bytes, question, rubric, total_points):
     """
-    Grade a student's answer using DeepSeek API with table-based feedback.
-    Each row has: mark = numeric point, rationale = detailed explanation.
+    Grade a student's answer using DeepSeek API with clean numeric marks.
     """
     # Construct grading prompt - explicitly request numeric marks only
     prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
@@ -160,35 +159,38 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 **Question:**
 {question}
 
-**Marking Rubric / Expected Answer:**
+**Marking Rubric / Expected Answer (each line represents separate criteria with points):**
 {rubric}
 
 **Total Points:** {total_points}
 
 **Student's Answer:** (See the uploaded image. Read and analyze all text from it.)
 
-Please respond with valid JSON ONLY in the following format:
+**IMPORTANT INSTRUCTIONS:**
+1. The rubric has specific point allocations. For each criterion in the rubric, determine if the student met it.
+2. For each criterion, assign the numeric points earned (e.g., 1, 2, 0).
+3. Write a clear, specific rationale explaining WHY they got those points.
 
+**OUTPUT FORMAT - JSON ONLY:**
 {{
-    "total_score": <total points awarded out of {total_points}>,
+    "total_score": <sum of all points awarded, max {total_points}>,
     "feedback_table": [
         {{
-            "mark": <numeric value ONLY, e.g., 1 or 2 or 0>,
-            "rationale": "<detailed explanation of why this mark was awarded or not>"
-        }}
+            "mark": <ONLY THE NUMBER, e.g., 1, 2, 0. NOTHING ELSE>,
+            "rationale": "<Explain why they got this mark. Reference what they wrote. Be specific.>"
+        }},
+        ... (one entry for each criterion in the rubric)
     ],
-    "overall_feedback": "<general feedback on the student's answer>"
+    "overall_feedback": "<A short paragraph summarizing strengths and areas for improvement>"
 }}
 
-IMPORTANT RULES FOR THE "mark" FIELD:
-- The "mark" field MUST be a NUMBER (like 1, 2, 0.5) - NO text!
-- DO NOT include descriptions like "1 mark" or "Formula stated" in the mark field.
-- The mark field should ONLY contain the numeric points awarded for that criterion.
-- Each rubric item should be a separate row in the feedback_table.
-- The sum of all marks in the table should equal total_score.
-
-Rules for grading:
-- Be specific - reference what the student actually wrote.
+**CRITICAL RULES:**
+- "mark" field MUST be a NUMBER like 1, 2, 0 - NO text!
+- DO NOT put descriptions like "1 mark for formula" in the mark field.
+- DO NOT repeat the rubric wording in the mark field.
+- Example of CORRECT mark field: "1"
+- Example of WRONG mark field: "1 mark for stating F=ma"
+- The rationale should explain the specific reasons for awarding or not awarding the point.
 - Be fair and consistent with the rubric.
 - If the answer is completely wrong or illegible, total_score = 0.
 """
@@ -234,7 +236,7 @@ Rules for grading:
         # Validate and clean feedback_table
         if not feedback_table or not isinstance(feedback_table, list):
             feedback_table = [
-                {"mark": 0, "rationale": "No detailed breakdown available."}
+                {"mark": "0", "rationale": "No detailed breakdown available."}
             ]
         
         # Clean each row - ensure mark is numeric ONLY
@@ -243,14 +245,12 @@ Rules for grading:
             # Get the mark value
             mark_val = row.get("mark", 0)
             
-            # Try to extract numeric value
+            # Force clean to numeric only
             if isinstance(mark_val, (int, float)):
                 numeric_mark = mark_val
             elif isinstance(mark_val, str):
-                # Try to extract number from string
-                import re
-                # Look for numbers like 1, 2, 0.5, 1/2, etc.
-                match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
+                # Try to extract ONLY the number
+                match = re.search(r'^(\d+(?:\.\d+)?)', mark_val.strip())
                 if match:
                     numeric_mark = float(match.group(1))
                 else:
@@ -262,12 +262,14 @@ Rules for grading:
             if numeric_mark == int(numeric_mark):
                 numeric_mark = int(numeric_mark)
             
-            # Get rationale
+            # Get rationale (clean it up)
             rationale = row.get("rationale", "No rationale provided.")
+            # Remove any rubric wording that might have been included
+            rationale = re.sub(r'^\s*\d+\s*mark(s?)?\s*(for|if|when)?\s*', '', rationale, flags=re.IGNORECASE)
             
             cleaned_table.append({
-                "mark": numeric_mark,  # Now a number, not text
-                "rationale": rationale
+                "mark": numeric_mark,
+                "rationale": rationale.strip()
             })
         
         return total_score, cleaned_table, overall_feedback
@@ -276,7 +278,7 @@ Rules for grading:
         return 0, [{"mark": 0, "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
     except Exception as e:
         return 0, [{"mark": 0, "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
-        
+
 # ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
@@ -284,16 +286,15 @@ def simulate_grade(question, rubric, student_answer, total_points):
     found = sum(1 for kw in keywords if kw.lower() in student_answer.lower())
     score = min(found, total_points)
     
-    # Create simulated feedback table
     feedback_table = []
     for i, kw in enumerate(keywords[:3]):
         earned = 1 if kw.lower() in student_answer.lower() else 0
         feedback_table.append({
-            "mark": f"Contains '{kw}'",
-            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer."
+            "mark": earned,
+            "rationale": f"{'✓ Found' if earned else '✗ Not found'} '{kw}' in student answer."
         })
     
-    overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords. (Replace with real DeepSeek API.)"
+    overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords."
     return score, feedback_table, overall_feedback
 
 # ---- Main entry point ----
@@ -304,6 +305,5 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
     if use_real_api and DEEPSEEK_API_KEY:
         return grade_student_submission(image_bytes, question, rubric, total_points)
     else:
-        # Use simulated grading with dummy transcription
         transcribed = "Dummy OCR text for simulation."
         return simulate_grade(question, rubric, transcribed, total_points)
