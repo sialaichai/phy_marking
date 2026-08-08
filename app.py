@@ -827,7 +827,7 @@ elif auth_type == "class":
                                     st.caption("No detailed breakdown available.")
                                 
                                 if email_sent:
-                                    st.success("📧 A copy of your grade has been sent to your email.")
+                                    st.success("📧 A copy of your grade has been sent to your email. (Check SPAM folder as well)")
                                 elif student_email:
                                     st.warning("⚠️ Email could not be sent, but your grade is shown above.")
                                 else:
