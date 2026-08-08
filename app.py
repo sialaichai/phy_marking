@@ -30,48 +30,118 @@ def extract_numeric_mark(mark_val):
     
     return "0"
 
-# ---- Helper function to display feedback table ----
+# ---- Helper function to display feedback table using HTML ----
 def display_feedback_table(feedback_table):
     """
-    Display feedback table using Streamlit's native table.
-    This ensures proper column alignment and mobile responsiveness.
+    Display feedback table using HTML to ensure no horizontal scrolling.
+    Uses pure HTML/CSS that fits within the screen width.
     """
     if not feedback_table or len(feedback_table) == 0:
         st.caption("No detailed breakdown available.")
         return
     
-    # Build a clean dataframe for display
-    display_data = []
+    # Build the HTML table
+    html = """
+    <div style="width: 100%; overflow-x: hidden; margin: 10px 0;">
+        <table style="
+            width: 100%;
+            border-collapse: collapse;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            table-layout: fixed;
+        ">
+            <thead>
+                <tr>
+                    <th style="
+                        background-color: #4CAF50;
+                        color: white;
+                        font-weight: bold;
+                        padding: 10px 8px;
+                        text-align: center;
+                        border: 1px solid #ddd;
+                        width: 20%;
+                    ">Mark</th>
+                    <th style="
+                        background-color: #4CAF50;
+                        color: white;
+                        font-weight: bold;
+                        padding: 10px 8px;
+                        text-align: left;
+                        border: 1px solid #ddd;
+                        width: 80%;
+                    ">Rationale & Details</th>
+                </tr>
+            </thead>
+            <tbody>
+    """
+    
+    # Add rows
+    row_num = 0
     for row in feedback_table:
         mark_val = row.get('mark', 0)
         numeric_mark = extract_numeric_mark(mark_val)
         rationale = row.get('rationale', 'No rationale provided.')
-        display_data.append({
-            "Mark": numeric_mark,
-            "Rationale": rationale
-        })
+        # Escape any special characters
+        rationale = rationale.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        
+        # Alternating row colors
+        bg_color = "#f9f9f9" if row_num % 2 == 1 else "#ffffff"
+        
+        html += f"""
+            <tr style="background-color: {bg_color};">
+                <td style="
+                    padding: 10px 8px;
+                    border: 1px solid #ddd;
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 16px;
+                    vertical-align: middle;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                ">{numeric_mark}</td>
+                <td style="
+                    padding: 10px 8px;
+                    border: 1px solid #ddd;
+                    text-align: left;
+                    vertical-align: top;
+                    word-wrap: break-word;
+                    overflow-wrap: break-word;
+                    white-space: normal;
+                    line-height: 1.6;
+                ">{rationale}</td>
+            </tr>
+        """
+        row_num += 1
     
-    # Use pandas DataFrame with st.dataframe
-    df = pd.DataFrame(display_data)
+    html += """
+            </tbody>
+        </table>
+    </div>
+    """
     
-    # Configure column widths for mobile
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Mark": st.column_config.Column(
-                "Mark",
-                help="Points awarded for this criterion",
-                width="small"
-            ),
-            "Rationale": st.column_config.Column(
-                "Rationale",
-                help="Detailed explanation",
-                width="large"
-            )
+    # Mobile responsive styles
+    st.markdown("""
+    <style>
+        @media (max-width: 768px) {
+            .feedback-table table {
+                font-size: 12px !important;
+            }
+            .feedback-table th, .feedback-table td {
+                padding: 8px 6px !important;
+                font-size: 12px !important;
+            }
+            .feedback-table td:first-child {
+                font-size: 14px !important;
+                width: 25% !important;
+            }
+            .feedback-table td:last-child {
+                width: 75% !important;
+            }
         }
-    )
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown(html, unsafe_allow_html=True)
 
 # ---- Page config ----
 st.set_page_config(
@@ -110,79 +180,6 @@ st.markdown("""
         font-size: 16px !important;
         padding: 12px !important;
     }
-    /* Table styling */
-    .stDataFrame {
-        width: 100% !important;
-        overflow-x: hidden !important;
-    }
-    .stDataFrame > div {
-        width: 100% !important;
-        overflow-x: hidden !important;
-    }
-    .stDataFrame table {
-        width: 100% !important;
-        table-layout: fixed !important;
-        font-size: 14px !important;
-    }
-    .stDataFrame th, .stDataFrame td {
-        padding: 10px 8px !important;
-        word-wrap: break-word !important;
-        white-space: normal !important;
-        overflow-wrap: break-word !important;
-        line-height: 1.5 !important;
-    }
-    /* Column 1: Narrow (Mark) */
-    .stDataFrame th:first-child, .stDataFrame td:first-child {
-        width: 18% !important;
-        min-width: 40px !important;
-        max-width: 70px !important;
-        text-align: center !important;
-        font-weight: bold !important;
-        background-color: #f5f5f5 !important;
-    }
-    /* Column 2: Wide (Rationale) */
-    .stDataFrame th:last-child, .stDataFrame td:last-child {
-        width: 82% !important;
-        text-align: left !important;
-    }
-    .stDataFrame thead tr th {
-        background-color: #4CAF50 !important;
-        color: white !important;
-        font-weight: bold !important;
-        padding: 10px 8px !important;
-    }
-    .stDataFrame tbody tr:nth-child(even) {
-        background-color: #f9f9f9 !important;
-    }
-    .stDataFrame tbody tr:nth-child(odd) {
-        background-color: #ffffff !important;
-    }
-    @media (max-width: 768px) {
-        .stButton button {
-            font-size: 20px;
-            padding: 15px 30px;
-        }
-        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
-            font-size: 1.5em !important;
-        }
-        .stDataFrame table {
-            font-size: 12px !important;
-        }
-        .stDataFrame th, .stDataFrame td {
-            padding: 8px 6px !important;
-            font-size: 12px !important;
-        }
-        .stDataFrame th:first-child, .stDataFrame td:first-child {
-            width: 20% !important;
-            min-width: 30px !important;
-            max-width: 50px !important;
-            font-size: 14px !important;
-        }
-        .stDataFrame th:last-child, .stDataFrame td:last-child {
-            width: 80% !important;
-            font-size: 12px !important;
-        }
-    }
     /* Camera input - larger on mobile */
     .stCameraInput {
         width: 100% !important;
@@ -206,6 +203,13 @@ st.markdown("""
         max-width: 100% !important;
     }
     @media (max-width: 768px) {
+        .stButton button {
+            font-size: 20px;
+            padding: 15px 30px;
+        }
+        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+            font-size: 1.5em !important;
+        }
         .stCameraInput {
             min-height: 500px !important;
         }
