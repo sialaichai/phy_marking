@@ -418,9 +418,22 @@ elif auth_type == "class":
                     
                     uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
                     
+                    # Add this in the student submission section, after the uploaded file preview
                     if uploaded_file is not None:
                         image = Image.open(uploaded_file)
                         st.image(image, caption="Your submission", width=300)
+                        
+                        # ---- Test button ----
+                        if st.button("🧪 Test API with this image"):
+                            with st.spinner("Testing API..."):
+                                img_bytes = uploaded_file.getvalue()
+                                result = grading.test_deepseek_api()
+                                st.code(f"API Test: {result}")
+                                
+                                # Test actual image processing
+                                try:
+                                    processed = grading.process_image_for_api(img_bytes)
+                                    st.success(f"Image processed: {len(processed)} bytes (original: {len(img_bytes)} bytes)")
                     
                     submitted = st.form_submit_button(
                         "📨 Submit for Grading",
