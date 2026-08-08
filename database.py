@@ -96,7 +96,7 @@ def delete_class(class_id: int):
     supabase.table("classes").delete().eq("id", class_id).execute()
 
 # ---- Teacher: mark schemes (INDEPENDENT OF CLASS) ----
-def add_mark_scheme(teacher_id: int, assignment_name: str, question: str, rubric: str, total_points: int, is_trial: bool = True):
+def add_mark_scheme(teacher_id: int, assignment_name: str, question: str, rubric: str, total_points: int, is_trial: bool = True, question_file_data: str = None, question_file_name: str = None, question_file_type: str = None):
     supabase = get_supabase()
     data = {
         "teacher_id": teacher_id,
@@ -106,6 +106,12 @@ def add_mark_scheme(teacher_id: int, assignment_name: str, question: str, rubric
         "total_points": total_points,
         "is_trial": is_trial
     }
+    if question_file_data:
+        data["question_file"] = json.dumps({
+            "data": question_file_data,
+            "name": question_file_name,
+            "type": question_file_type
+        })
     result = supabase.table("mark_schemes").insert(data).execute()
     return result.data[0]["id"] if result.data else None
 
