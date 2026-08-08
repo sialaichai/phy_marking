@@ -285,87 +285,123 @@ elif auth_type == "class":
     # Student page options
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
-    # ---------- Submit Work ----------
-    if page == "Submit Work":
-        # Get all mark schemes for this class
-        supabase = db.get_supabase()
-        schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
-        if not schemes:
-            st.warning("No assignments available for this class yet.")
+# ---------- Submit Work ----------
+elif page == "Submit Work":
+    st.header("📸 Submit Your Work")
+    
+    # Get all mark schemes for this class
+    supabase = db.get_supabase()
+    schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
+    
+    if not schemes:
+        st.warning("No assignments available for this class yet.")
+    else:
+        scheme_options = {f"{s['assignment_name']} (ID: {s['id']})": s['id'] for s in schemes}
+        selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
+        scheme_id = scheme_options[selected_label]
+        scheme = db.get_mark_scheme(scheme_id)
+        if scheme:
+            st.write(f"**Question:** {scheme['question']}")
+            st.write(f"**Total points:** {scheme['total_points']}")
+
+        # Student details
+        student_name = st.text_input("Your Full Name", placeholder="e.g., John Doe")
+        student_email = st.text_input("Your Email Address", placeholder="john@example.com")
+        st.caption("📧 Your grade and feedback will be sent to this email address.")
+        
+        uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
+        
+        if uploaded_file is not None:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Your submission", width=300)
+            
+            if st.button("📨 Submit for Grading"):
+                # Validation
+                if not student_name:
+                    st.error("Please enter your name.")
+                elif not student_email:
+                    st.error("Please enter your email address.")
+                elif not email_utils.is_valid_email(student_email):
+                    st.error("Please enter a valid email address (e.g., name@domain.com).")
+                else:
+                    with st.spinner("Grading..."):
+                        img_bytes = uploaded_file.getvalue()
+                        
+                        # Grade the submission
+                        grade, feedback = grading.grade_submission(
+                            img_bytes, 
+                            scheme["question"], 
+                            scheme["rubric"], 
+                            scheme["total_points"],
+                            use_real_api=True
+                        )
+                        
+                        # Save to database with email
+                        is_trial = scheme.get('is_trial', True)
+                        db.add_submission_with_email(
+                            scheme_id, 
+                            student_name, 
+                            student_email, 
+                            "Image processed", 
+                            grade, 
+                            feedback,
+                            is_trial=is_trial
+                        )
+                        
+                        # Send email notification
+                        email_status = email_utils.send_grade_email(
+                            student_email, 
+                            student_name, 
+                            scheme["question"], 
+                            grade, 
+                            scheme["total_points"], 
+                            feedback
+                        )
+                        
+                        # Show success messages
+                        st.success(f"✅ Grading complete! You scored **{grade}/{scheme['total_points']}**.")
+                        st.info(f"**Feedback:** {feedback}")
+                        
+                        if "sent successfully" in email_status:
+                            st.success("📧 A copy of your grade has been sent to your email.")
+                        else:
+                            st.warning(f"⚠️ {email_status}")
+                        
+                        st.caption("Your grade and feedback are private and only visible to you and your teacher.")
+
+elif page == "My Results":
+    st.subheader("📖 View Your Results")
+    
+    st.info("Enter your email address to view your own grades and feedback. No other students can see your results.")
+    
+    # Ask student for their email (to view results)
+    view_email = st.text_input("Enter your email address:", type="default")
+    
+    if view_email:
+        if not email_utils.is_valid_email(view_email):
+            st.error("Please enter a valid email address.")
         else:
-            scheme_options = {f"{s['assignment_name']} (ID: {s['id']})": s['id'] for s in schemes}
-            selected_label = st.selectbox("Choose assignment", list(scheme_options.keys()))
-            scheme_id = scheme_options[selected_label]
-            scheme = db.get_mark_scheme(scheme_id)
-            if scheme:
-                st.write(f"**Question:** {scheme['question']}")
-                st.write(f"**Total points:** {scheme['total_points']}")
-
-            student_name = st.text_input("Your Full Name (for this submission)")
-            # Inside the submission block, after they enter their name
-            st.session_state["student_name_filter"] = student_name
-            uploaded_file = st.file_uploader("Take a photo or upload an image of your answer", type=["jpg", "jpeg", "png"])
-            if uploaded_file is not None:
-                image = Image.open(uploaded_file)
-                st.image(image, caption="Your submission", width=300)
-                if st.button("📨 Submit for Grading"):
-                    if not student_name:
-                        st.error("Please enter your name.")
-                    else:
-                        with st.spinner("Grading..."):
-                            img_bytes = uploaded_file.getvalue()
-                            # Use the real DeepSeek API (set use_real_api=True)
-                            grade, feedback = grading.grade_submission(
-                                img_bytes, 
-                                scheme["question"], 
-                                scheme["rubric"], 
-                                scheme["total_points"],
-                                use_real_api=True   # now using real API
-                            )
-                            db.add_submission(scheme_id, student_name, "Image processed", grade, feedback)
-                            st.success(f"✅ Grade: **{grade}/{scheme['total_points']}**")
-                            st.info(f"**Feedback:** {feedback}")
-
-                            # Inside student submission block, after grading:
-                            scheme = db.get_mark_scheme(scheme_id)
-                            is_trial = scheme.get('is_trial', True) if scheme else True
-                            
-                            db.add_submission_with_trial(
-                                scheme_id, 
-                                student_name, 
-                                "Image processed", 
-                                grade, 
-                                feedback,
-                                is_trial=is_trial
-                            )
-
-    # ---------- My Results ----------
-    elif page == "My Results":
-        st.subheader("📖 Your Previous Results")
-        student_name_filter = st.text_input("Enter your full name to see your submissions:", value=st.session_state.get("my_name", ""))
-        if not student_name_filter:
-            st.info("Please enter your name above.")
-            # Optional: clear the key if empty
-        else:
-            st.session_state["my_name"] = student_name_filter
-            supabase = db.get_supabase()
-            schemes = supabase.table("mark_schemes").select("*").eq("class_id", class_id).execute().data
-            if not schemes:
-                st.info("No assignments available.")
+            # Get submissions for this email in this class
+            submissions = db.get_submissions_by_email(class_id, view_email)
+            
+            if not submissions:
+                st.warning(f"No submissions found for {view_email}. Please check your email or submit some work first.")
             else:
-                found_any = False
-                for scheme in schemes:
-                    all_subs = db.get_submissions_by_scheme(scheme['id'])
-                    # Filter by student name
-                    my_subs = [s for s in all_subs if s['student_name'].lower() == student_name_filter.lower()]
-                    if my_subs:
-                        found_any = True
-                        st.markdown(f"### **{scheme['assignment_name']}**")
-                        for sub in my_subs:
-                            # Only show score and feedback, not other names
-                            st.write(f"- **Score**: {sub['grade']}/{scheme['total_points']} – **Feedback**: {sub['feedback']}")
-                            with st.expander("See details"):
-                                st.write(f"**Your transcribed text:** {sub['transcribed_text']}")
-                                st.write(f"**Graded at:** {sub['graded_at']}")
-                if not found_any:
-                    st.warning(f"No submissions found for '{student_name_filter}'. Please check your name.")
+                st.success(f"Found {len(submissions)} submission(s) for {view_email}")
+                
+                for sub in submissions:
+                    # Get scheme details from the joined data
+                    scheme_data = sub.get('mark_schemes', {})
+                    assignment_name = scheme_data.get('assignment_name', 'Unknown Assignment')
+                    question = scheme_data.get('question', '')
+                    total_points = scheme_data.get('total_points', 0)
+                    
+                    st.markdown(f"### 📝 {assignment_name}")
+                    st.write(f"**Score:** {sub['grade']}/{total_points}")
+                    
+                    with st.expander("📋 View Full Feedback and Question"):
+                        st.write(f"**Question:** {question}")
+                        st.write(f"**Feedback:** {sub['feedback']}")
+                        st.write(f"**Submitted:** {sub['graded_at']}")
+                    
+                    st.divider()
