@@ -197,6 +197,7 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 - The "rationale" should reference specific things the student actually wrote in the image.
 - If the student wrote something that matches the rubric, award the points and quote what they wrote.
 - If the student didn't write something, explain what was missing.
+- NEVER quote the rubric as if it was the student's answer.
 
 **Example of correct rationale:**
 "Student wrote 'F=ma' which matches the rubric. Awarded 1 point."
@@ -249,7 +250,7 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
                 {"mark": 0, "rationale": "No detailed breakdown available."}
             ]
         
-        # Clean each row - ensure mark is numeric ONLY
+        # Clean each row - ensure mark is numeric ONLY and remove rubric text from rationale
         cleaned_table = []
         for row in feedback_table:
             # Get the mark value
@@ -272,11 +273,23 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
             if numeric_mark == int(numeric_mark):
                 numeric_mark = int(numeric_mark)
             
-            # Get rationale and clean it
+            # Get rationale and REMOVE ANY RUBRIC TEXT
             rationale = row.get("rationale", "No rationale provided.")
-            # Remove any "rubric says" or similar phrases
-            rationale = re.sub(r'(?:the\s+)?rubric\s+(?:says|states|mentions|indicates|has)\s+', '', rationale, flags=re.IGNORECASE)
+            
+            # Remove any phrases that reference the rubric as the source
+            rationale = re.sub(r'(?:the\s+)?rubric\s+(?:says|states|mentions|indicates|has|requires|asks for)\s+', '', rationale, flags=re.IGNORECASE)
             rationale = re.sub(r'^\s*\d+\s*mark(s?)\s*(?:for|if|when)\s*', '', rationale, flags=re.IGNORECASE)
+            rationale = re.sub(r'(?:according to|based on|as per)\s+(?:the\s+)?rubric\s*', '', rationale, flags=re.IGNORECASE)
+            
+            # Remove any quoted text that might be from the rubric
+            # Remove anything inside quotes that looks like rubric text
+            rationale = re.sub(r'"([^"]*)"', lambda m: m.group(1) if len(m.group(1)) < 20 else '', rationale)
+            
+            # If rationale still contains "rubric", remove that part
+            rationale = re.sub(r'[Rr]ubric:\s*', '', rationale)
+            
+            # Clean up extra spaces
+            rationale = ' '.join(rationale.split())
             
             cleaned_table.append({
                 "mark": numeric_mark,
@@ -293,7 +306,6 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 # ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
-    # Extract keywords from rubric
     keywords = re.findall(r'\b[a-zA-Z]{3,}\b', rubric)[:5]
     found = sum(1 for kw in keywords if kw.lower() in student_answer.lower())
     score = min(found, total_points)
