@@ -30,118 +30,39 @@ def extract_numeric_mark(mark_val):
     
     return "0"
 
-# ---- Helper function to display feedback table using HTML ----
+# ---- Helper function to display feedback table ----
 def display_feedback_table(feedback_table):
     """
-    Display feedback table using HTML to ensure no horizontal scrolling.
-    Uses pure HTML/CSS that fits within the screen width.
+    Display feedback table using Streamlit's native columns.
+    This is the most reliable way to avoid horizontal scrolling.
     """
     if not feedback_table or len(feedback_table) == 0:
         st.caption("No detailed breakdown available.")
         return
     
-    # Build the HTML table
-    html = """
-    <div style="width: 100%; overflow-x: hidden; margin: 10px 0;">
-        <table style="
-            width: 100%;
-            border-collapse: collapse;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            font-size: 14px;
-            table-layout: fixed;
-        ">
-            <thead>
-                <tr>
-                    <th style="
-                        background-color: #4CAF50;
-                        color: white;
-                        font-weight: bold;
-                        padding: 10px 8px;
-                        text-align: center;
-                        border: 1px solid #ddd;
-                        width: 20%;
-                    ">Mark</th>
-                    <th style="
-                        background-color: #4CAF50;
-                        color: white;
-                        font-weight: bold;
-                        padding: 10px 8px;
-                        text-align: left;
-                        border: 1px solid #ddd;
-                        width: 80%;
-                    ">Rationale & Details</th>
-                </tr>
-            </thead>
-            <tbody>
-    """
+    # Header row with column headers
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        st.markdown("**Mark**")
+    with col2:
+        st.markdown("**Rationale & Details**")
+    st.divider()
     
-    # Add rows
-    row_num = 0
+    # Display each row
     for row in feedback_table:
         mark_val = row.get('mark', 0)
         numeric_mark = extract_numeric_mark(mark_val)
         rationale = row.get('rationale', 'No rationale provided.')
-        # Escape any special characters
-        rationale = rationale.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         
-        # Alternating row colors
-        bg_color = "#f9f9f9" if row_num % 2 == 1 else "#ffffff"
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            # Center the mark
+            st.markdown(f"**{numeric_mark}**")
+        with col2:
+            st.write(rationale)
         
-        html += f"""
-            <tr style="background-color: {bg_color};">
-                <td style="
-                    padding: 10px 8px;
-                    border: 1px solid #ddd;
-                    text-align: center;
-                    font-weight: bold;
-                    font-size: 16px;
-                    vertical-align: middle;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                ">{numeric_mark}</td>
-                <td style="
-                    padding: 10px 8px;
-                    border: 1px solid #ddd;
-                    text-align: left;
-                    vertical-align: top;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    white-space: normal;
-                    line-height: 1.6;
-                ">{rationale}</td>
-            </tr>
-        """
-        row_num += 1
-    
-    html += """
-            </tbody>
-        </table>
-    </div>
-    """
-    
-    # Mobile responsive styles
-    st.markdown("""
-    <style>
-        @media (max-width: 768px) {
-            .feedback-table table {
-                font-size: 12px !important;
-            }
-            .feedback-table th, .feedback-table td {
-                padding: 8px 6px !important;
-                font-size: 12px !important;
-            }
-            .feedback-table td:first-child {
-                font-size: 14px !important;
-                width: 25% !important;
-            }
-            .feedback-table td:last-child {
-                width: 75% !important;
-            }
-        }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown(html, unsafe_allow_html=True)
+        # Small space between rows
+        st.caption("")
 
 # ---- Page config ----
 st.set_page_config(
