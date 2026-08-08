@@ -152,8 +152,9 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
 def grade_student_submission(image_bytes, question, rubric, total_points):
     """
     Grade a student's answer using DeepSeek API with table-based feedback.
+    Each row has: mark = numeric point, rationale = detailed explanation.
     """
-    # Construct grading prompt with table-based feedback instructions
+    # Construct grading prompt with numeric mark format
     prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
 
 **Question:**
@@ -172,12 +173,12 @@ Please respond with valid JSON ONLY in the following format:
     "total_score": <total points awarded out of {total_points}>,
     "feedback_table": [
         {{
-            "mark": "<description of what this mark was for, e.g., 'States the correct formula (F=ma)'>",
+            "mark": "<numeric point value for this criterion, e.g., '1' or '2'>",
             "rationale": "<detailed explanation of why this mark was awarded or not>"
         }},
         {{
-            "mark": "<description of what this mark was for>",
-            "rationale": "<detailed explanation of why this mark was awarded or not>"
+            "mark": "<numeric point value>",
+            "rationale": "<detailed explanation>"
         }}
     ],
     "overall_feedback": "<general feedback on the student's answer, strengths and areas for improvement>"
@@ -185,7 +186,8 @@ Please respond with valid JSON ONLY in the following format:
 
 Rules:
 - The total_score must be an integer between 0 and {total_points}.
-- Each mark (point) in the rubric should have its own row in the feedback_table.
+- Each criterion from the rubric should have its own row in the feedback_table.
+- The "mark" field should ONLY be a number (e.g., "1", "2", "0", "0.5"). Do not include text like "1/2" or "1 mark".
 - For each mark, explain clearly why the student got it (e.g., "Correctly stated F=ma") or why they didn't (e.g., "Did not show the derivation").
 - Be specific - reference what the student actually wrote.
 - Be fair and consistent with the rubric.
@@ -234,22 +236,39 @@ Rules:
         if not feedback_table or not isinstance(feedback_table, list):
             # If no table, create a default one
             feedback_table = [
-                {"mark": "Overall performance", "rationale": "No detailed breakdown available."}
+                {"mark": "0", "rationale": "No detailed breakdown available."}
             ]
         
-        # Ensure each row has the required fields
+        # Ensure each row has numeric mark and rationale
         for row in feedback_table:
-            if "mark" not in row:
-                row["mark"] = "Unknown criterion"
+            # Clean up mark field - extract just the number
+            if "mark" in row:
+                mark_val = row["mark"]
+                # Extract numeric value from string if needed
+                if isinstance(mark_val, str):
+                    # Try to extract number from string like "1 mark" or "1/2"
+                    import re
+                    match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
+                    if match:
+                        row["mark"] = match.group(1)
+                    else:
+                        row["mark"] = "0"
+                elif isinstance(mark_val, (int, float)):
+                    row["mark"] = str(mark_val)
+                else:
+                    row["mark"] = "0"
+            else:
+                row["mark"] = "0"
+            
             if "rationale" not in row:
                 row["rationale"] = "No rationale provided."
             
         return total_score, feedback_table, overall_feedback
         
     except json.JSONDecodeError as e:
-        return 0, [{"mark": "Error", "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": "0", "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
     except Exception as e:
-        return 0, [{"mark": "Error", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": "0", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
 # ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
