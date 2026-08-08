@@ -110,6 +110,7 @@ def add_mark_scheme(teacher_id: int, assignment_name: str, question: str, rubric
     return result.data[0]["id"] if result.data else None
 
 def get_teacher_mark_schemes(teacher_id: int, include_trial: bool = True):
+    """Get all mark schemes for a teacher, optionally filtering trial data."""
     supabase = get_supabase()
     query = supabase.table("mark_schemes").select("*").eq("teacher_id", teacher_id)
     if not include_trial:
@@ -187,3 +188,11 @@ def convert_to_real_data(scheme_id: int):
     supabase.table("mark_schemes").update({"is_trial": False}).eq("id", scheme_id).execute()
     # Mark all its submissions as real
     supabase.table("submissions").update({"is_trial": False}).eq("mark_scheme_id", scheme_id).execute()
+
+# ---- Get teacher ID from class ID ----
+def get_teacher_id_from_class(class_id: int):
+    supabase = get_supabase()
+    result = supabase.table("classes").select("teacher_id").eq("id", class_id).execute()
+    if result.data:
+        return result.data[0]["teacher_id"]
+    return None
