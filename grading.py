@@ -76,7 +76,7 @@ def process_image_for_api(image_bytes):
 
 def analyze_image_with_deepseek(image_bytes, prompt_text):
     """
-    Send an image to DeepSeek model for analysis using the correct format.
+    Send an image to DeepSeek model for analysis.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: DeepSeek API key not found. Please add it to secrets."
@@ -102,7 +102,7 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
     
     # Step 4: Build payload with image as markdown
     image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image. ONLY analyze this image for the student's work:\n{image_markdown}"
     
     payload = {
         "model": "deepseek-chat",
@@ -153,46 +153,56 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
     """
     Grade a student's answer using DeepSeek API with clean numeric marks.
     """
-    # Construct grading prompt - explicitly request numeric marks only
-    prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
+    # Construct grading prompt with CLEAR SEPARATION between rubric and student work
+    prompt = f"""You are a strict teacher. Grade the student's answer based ONLY on the rubric provided.
+
+**IMPORTANT - READ CAREFULLY:**
+1. The rubric below is the MARKING SCHEME - it's what the teacher expects.
+2. The student's answer is in the ATTACHED IMAGE.
+3. DO NOT use the rubric text as the student's answer. ONLY analyze what's in the image.
 
 **Question:**
 {question}
 
-**Marking Rubric / Expected Answer (each line represents separate criteria with points):**
+**MARKING RUBRIC (This is the teacher's marking scheme, NOT the student's answer):**
 {rubric}
 
-**Total Points:** {total_points}
+**Total Points Available:** {total_points}
 
-**Student's Answer:** (See the uploaded image. Read and analyze all text from it.)
+**THE STUDENT'S ANSWER IS IN THE ATTACHED IMAGE. ONLY ANALYZE THE IMAGE CONTENT.**
 
-**IMPORTANT INSTRUCTIONS:**
-1. The rubric has specific point allocations. For each criterion in the rubric, determine if the student met it.
-2. For each criterion, assign the numeric points earned (e.g., 1, 2, 0).
-3. Write a clear, specific rationale explaining WHY they got those points.
+**Your task:**
+1. Look at the image and read the student's handwriting/typed answer.
+2. Compare what the student wrote against each criterion in the rubric.
+3. Award points based on what the student actually wrote.
 
 **OUTPUT FORMAT - JSON ONLY:**
 {{
-    "total_score": <sum of all points awarded, max {total_points}>,
+    "total_score": <total points awarded out of {total_points}>,
     "feedback_table": [
         {{
-            "mark": <ONLY THE NUMBER, e.g., 1, 2, 0. NOTHING ELSE>,
-            "rationale": "<Explain why they got this mark. Reference what they wrote. Be specific.>"
+            "mark": <ONLY THE NUMBER of points awarded for this criterion, e.g., 1, 2, 0>,
+            "rationale": "<Explain specifically what the student wrote and why they got/didn't get this point. Reference the student's actual words from the image.>"
         }},
-        ... (one entry for each criterion in the rubric)
+        ... (one entry for each rubric criterion)
     ],
-    "overall_feedback": "<A short paragraph summarizing strengths and areas for improvement>"
+    "overall_feedback": "<Short summary of strengths and areas for improvement>"
 }}
 
-**CRITICAL RULES:**
-- "mark" field MUST be a NUMBER like 1, 2, 0 - NO text!
-- DO NOT put descriptions like "1 mark for formula" in the mark field.
-- DO NOT repeat the rubric wording in the mark field.
-- Example of CORRECT mark field: "1"
-- Example of WRONG mark field: "1 mark for stating F=ma"
-- The rationale should explain the specific reasons for awarding or not awarding the point.
-- Be fair and consistent with the rubric.
-- If the answer is completely wrong or illegible, total_score = 0.
+**CRITICAL RULES TO PREVENT CONFUSION:**
+- The rubric is NOT the student's answer. It's the marking scheme.
+- Only read the student's answer from the IMAGE.
+- Do NOT repeat the rubric wording in the "mark" field.
+- The "mark" field must contain ONLY a number (e.g., 1, 2, 0).
+- The "rationale" should reference specific things the student actually wrote in the image.
+- If the student wrote something that matches the rubric, award the points and quote what they wrote.
+- If the student didn't write something, explain what was missing.
+
+**Example of correct rationale:**
+"Student wrote 'F=ma' which matches the rubric. Awarded 1 point."
+
+**Example of WRONG rationale (DO NOT DO THIS):**
+"The rubric says 'State F=ma' so they get 1 point." - This is wrong because it quotes the rubric instead of the student.
 """
 
     # Call API
@@ -236,7 +246,7 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
         # Validate and clean feedback_table
         if not feedback_table or not isinstance(feedback_table, list):
             feedback_table = [
-                {"mark": "0", "rationale": "No detailed breakdown available."}
+                {"mark": 0, "rationale": "No detailed breakdown available."}
             ]
         
         # Clean each row - ensure mark is numeric ONLY
@@ -262,10 +272,11 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
             if numeric_mark == int(numeric_mark):
                 numeric_mark = int(numeric_mark)
             
-            # Get rationale (clean it up)
+            # Get rationale and clean it
             rationale = row.get("rationale", "No rationale provided.")
-            # Remove any rubric wording that might have been included
-            rationale = re.sub(r'^\s*\d+\s*mark(s?)?\s*(for|if|when)?\s*', '', rationale, flags=re.IGNORECASE)
+            # Remove any "rubric says" or similar phrases
+            rationale = re.sub(r'(?:the\s+)?rubric\s+(?:says|states|mentions|indicates|has)\s+', '', rationale, flags=re.IGNORECASE)
+            rationale = re.sub(r'^\s*\d+\s*mark(s?)\s*(?:for|if|when)\s*', '', rationale, flags=re.IGNORECASE)
             
             cleaned_table.append({
                 "mark": numeric_mark,
@@ -282,7 +293,8 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 # ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
-    keywords = rubric.split()[:3]
+    # Extract keywords from rubric
+    keywords = re.findall(r'\b[a-zA-Z]{3,}\b', rubric)[:5]
     found = sum(1 for kw in keywords if kw.lower() in student_answer.lower())
     score = min(found, total_points)
     
@@ -291,7 +303,7 @@ def simulate_grade(question, rubric, student_answer, total_points):
         earned = 1 if kw.lower() in student_answer.lower() else 0
         feedback_table.append({
             "mark": earned,
-            "rationale": f"{'✓ Found' if earned else '✗ Not found'} '{kw}' in student answer."
+            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer: '{kw}'"
         })
     
     overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords."
