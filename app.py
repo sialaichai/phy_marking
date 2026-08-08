@@ -326,6 +326,19 @@ elif auth_type == "class":
                             st.success(f"✅ Grade: **{grade}/{scheme['total_points']}**")
                             st.info(f"**Feedback:** {feedback}")
 
+                            # Inside student submission block, after grading:
+                            scheme = db.get_mark_scheme(scheme_id)
+                            is_trial = scheme.get('is_trial', True) if scheme else True
+                            
+                            db.add_submission_with_trial(
+                                scheme_id, 
+                                student_name, 
+                                "Image processed", 
+                                grade, 
+                                feedback,
+                                is_trial=is_trial
+                            )
+
     # ---------- My Results ----------
     elif page == "My Results":
         st.subheader("📖 Your Previous Results")
