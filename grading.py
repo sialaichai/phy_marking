@@ -93,18 +93,15 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
     except Exception as e:
         return f"ERROR: Base64 encoding failed: {str(e)}"
     
-    # Step 3: Prepare API request with CORRECT format
+    # Step 3: Prepare API request
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Step 4: Build payload - DeepSeek expects images as markdown or text
-    # Alternative approach: Send image as markdown in the text
+    # Step 4: Build payload with image as markdown
     image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    
-    # Combine prompt with image markdown
     full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
     
     payload = {
@@ -115,7 +112,7 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
                 "content": full_prompt
             }
         ],
-        "max_tokens": 1000,
+        "max_tokens": 1500,  # Increased to allow for detailed feedback
         "temperature": 0.2
     }
     
@@ -154,9 +151,9 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
 
 def grade_student_submission(image_bytes, question, rubric, total_points):
     """
-    Grade a student's answer using DeepSeek API.
+    Grade a student's answer using DeepSeek API with table-based feedback.
     """
-    # Construct grading prompt with clear instructions
+    # Construct grading prompt with table-based feedback instructions
     prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
 
 **Question:**
@@ -172,15 +169,27 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 Please respond with valid JSON ONLY in the following format:
 
 {{
-    "score": <number of points the student earned between 0 and {total_points}>,
-    "feedback": "<detailed feedback explaining the score, referencing specific parts of the student's answer>"
+    "total_score": <total points awarded out of {total_points}>,
+    "feedback_table": [
+        {{
+            "mark": "<description of what this mark was for, e.g., 'States the correct formula (F=ma)'>",
+            "rationale": "<detailed explanation of why this mark was awarded or not>"
+        }},
+        {{
+            "mark": "<description of what this mark was for>",
+            "rationale": "<detailed explanation of why this mark was awarded or not>"
+        }}
+    ],
+    "overall_feedback": "<general feedback on the student's answer, strengths and areas for improvement>"
 }}
 
 Rules:
-- The score must be an integer between 0 and {total_points}.
+- The total_score must be an integer between 0 and {total_points}.
+- Each mark (point) in the rubric should have its own row in the feedback_table.
+- For each mark, explain clearly why the student got it (e.g., "Correctly stated F=ma") or why they didn't (e.g., "Did not show the derivation").
+- Be specific - reference what the student actually wrote.
 - Be fair and consistent with the rubric.
-- Provide specific, actionable feedback.
-- If the answer is completely wrong, missing, or illegible, award 0 points.
+- If the answer is completely wrong, missing, or illegible, set total_score to 0.
 """
 
     # Call API
@@ -188,7 +197,7 @@ Rules:
     
     # Check for errors
     if response_text.startswith("ERROR:"):
-        return 0, response_text
+        return 0, [], f"ERROR: {response_text}"
     
     # Parse JSON response
     try:
@@ -205,36 +214,61 @@ Rules:
         
         # Parse JSON
         result = json.loads(cleaned_text)
-        score = result.get("score", 0)
-        feedback = result.get("feedback", "No feedback provided.")
+        total_score = result.get("total_score", 0)
+        feedback_table = result.get("feedback_table", [])
+        overall_feedback = result.get("overall_feedback", "No overall feedback provided.")
         
-        # Ensure score is valid
+        # Ensure total_score is valid
         try:
-            score = int(score)
+            total_score = int(total_score)
         except (ValueError, TypeError):
-            score = 0
+            total_score = 0
             
         # Clamp score to valid range
-        if score < 0:
-            score = 0
-        elif score > total_points:
-            score = total_points
+        if total_score < 0:
+            total_score = 0
+        elif total_score > total_points:
+            total_score = total_points
+        
+        # Validate feedback_table structure
+        if not feedback_table or not isinstance(feedback_table, list):
+            # If no table, create a default one
+            feedback_table = [
+                {"mark": "Overall performance", "rationale": "No detailed breakdown available."}
+            ]
+        
+        # Ensure each row has the required fields
+        for row in feedback_table:
+            if "mark" not in row:
+                row["mark"] = "Unknown criterion"
+            if "rationale" not in row:
+                row["rationale"] = "No rationale provided."
             
-        return score, feedback
+        return total_score, feedback_table, overall_feedback
         
     except json.JSONDecodeError as e:
-        return 0, f"Failed to parse grading response: {str(e)}. Raw: {response_text[:200]}..."
+        return 0, [{"mark": "Error", "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
     except Exception as e:
-        return 0, f"Unexpected error: {str(e)}"
+        return 0, [{"mark": "Error", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
-# ---- Fallback: Simulated grading ----
+# ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
-    keywords = rubric.split()[:5]
+    keywords = rubric.split()[:3]
     found = sum(1 for kw in keywords if kw.lower() in student_answer.lower())
     score = min(found, total_points)
-    feedback = f"Simulated grading: found {found} keywords. (Replace with real DeepSeek API.)"
-    return score, feedback
+    
+    # Create simulated feedback table
+    feedback_table = []
+    for i, kw in enumerate(keywords[:3]):
+        earned = 1 if kw.lower() in student_answer.lower() else 0
+        feedback_table.append({
+            "mark": f"Contains '{kw}'",
+            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer."
+        })
+    
+    overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords. (Replace with real DeepSeek API.)"
+    return score, feedback_table, overall_feedback
 
 # ---- Main entry point ----
 def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
