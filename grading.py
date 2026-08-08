@@ -154,7 +154,7 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
     Grade a student's answer using DeepSeek API with table-based feedback.
     Each row has: mark = numeric point, rationale = detailed explanation.
     """
-    # Construct grading prompt with numeric mark format
+    # Construct grading prompt - explicitly request numeric marks only
     prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
 
 **Question:**
@@ -173,25 +173,24 @@ Please respond with valid JSON ONLY in the following format:
     "total_score": <total points awarded out of {total_points}>,
     "feedback_table": [
         {{
-            "mark": "<numeric point value for this criterion, e.g., '1' or '2'>",
+            "mark": <numeric value ONLY, e.g., 1 or 2 or 0>,
             "rationale": "<detailed explanation of why this mark was awarded or not>"
-        }},
-        {{
-            "mark": "<numeric point value>",
-            "rationale": "<detailed explanation>"
         }}
     ],
-    "overall_feedback": "<general feedback on the student's answer, strengths and areas for improvement>"
+    "overall_feedback": "<general feedback on the student's answer>"
 }}
 
-Rules:
-- The total_score must be an integer between 0 and {total_points}.
-- Each criterion from the rubric should have its own row in the feedback_table.
-- The "mark" field should ONLY be a number (e.g., "1", "2", "0", "0.5"). Do not include text like "1/2" or "1 mark".
-- For each mark, explain clearly why the student got it (e.g., "Correctly stated F=ma") or why they didn't (e.g., "Did not show the derivation").
+IMPORTANT RULES FOR THE "mark" FIELD:
+- The "mark" field MUST be a NUMBER (like 1, 2, 0.5) - NO text!
+- DO NOT include descriptions like "1 mark" or "Formula stated" in the mark field.
+- The mark field should ONLY contain the numeric points awarded for that criterion.
+- Each rubric item should be a separate row in the feedback_table.
+- The sum of all marks in the table should equal total_score.
+
+Rules for grading:
 - Be specific - reference what the student actually wrote.
 - Be fair and consistent with the rubric.
-- If the answer is completely wrong, missing, or illegible, set total_score to 0.
+- If the answer is completely wrong or illegible, total_score = 0.
 """
 
     # Call API
@@ -232,44 +231,52 @@ Rules:
         elif total_score > total_points:
             total_score = total_points
         
-        # Validate feedback_table structure
+        # Validate and clean feedback_table
         if not feedback_table or not isinstance(feedback_table, list):
-            # If no table, create a default one
             feedback_table = [
-                {"mark": "0", "rationale": "No detailed breakdown available."}
+                {"mark": 0, "rationale": "No detailed breakdown available."}
             ]
         
-        # Ensure each row has numeric mark and rationale
+        # Clean each row - ensure mark is numeric ONLY
+        cleaned_table = []
         for row in feedback_table:
-            # Clean up mark field - extract just the number
-            if "mark" in row:
-                mark_val = row["mark"]
-                # Extract numeric value from string if needed
-                if isinstance(mark_val, str):
-                    # Try to extract number from string like "1 mark" or "1/2"
-                    import re
-                    match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
-                    if match:
-                        row["mark"] = match.group(1)
-                    else:
-                        row["mark"] = "0"
-                elif isinstance(mark_val, (int, float)):
-                    row["mark"] = str(mark_val)
+            # Get the mark value
+            mark_val = row.get("mark", 0)
+            
+            # Try to extract numeric value
+            if isinstance(mark_val, (int, float)):
+                numeric_mark = mark_val
+            elif isinstance(mark_val, str):
+                # Try to extract number from string
+                import re
+                # Look for numbers like 1, 2, 0.5, 1/2, etc.
+                match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
+                if match:
+                    numeric_mark = float(match.group(1))
                 else:
-                    row["mark"] = "0"
+                    numeric_mark = 0
             else:
-                row["mark"] = "0"
+                numeric_mark = 0
             
-            if "rationale" not in row:
-                row["rationale"] = "No rationale provided."
+            # Ensure it's an integer or simple decimal
+            if numeric_mark == int(numeric_mark):
+                numeric_mark = int(numeric_mark)
             
-        return total_score, feedback_table, overall_feedback
+            # Get rationale
+            rationale = row.get("rationale", "No rationale provided.")
+            
+            cleaned_table.append({
+                "mark": numeric_mark,  # Now a number, not text
+                "rationale": rationale
+            })
+        
+        return total_score, cleaned_table, overall_feedback
         
     except json.JSONDecodeError as e:
-        return 0, [{"mark": "0", "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": 0, "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
     except Exception as e:
-        return 0, [{"mark": "0", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
-
+        return 0, [{"mark": 0, "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
+        
 # ---- Fallback: Simulated grading with table ----
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
