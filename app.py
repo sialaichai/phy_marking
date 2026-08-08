@@ -434,6 +434,8 @@ elif auth_type == "class":
                                 try:
                                     processed = grading.process_image_for_api(img_bytes)
                                     st.success(f"Image processed: {len(processed)} bytes (original: {len(img_bytes)} bytes)")
+                                except Exception as e:
+                                    st.error(f"Image processing error: {e}")
                     
                     submitted = st.form_submit_button(
                         "📨 Submit for Grading",
