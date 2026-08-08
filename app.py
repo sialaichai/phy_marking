@@ -7,7 +7,7 @@ import io
 import traceback
 
 st.set_page_config(page_title="Smart Marking App", layout="centered")
-st.set_option('deprecation.showfileUploaderEncoding', False)
+
 # ---- Init DB ----
 db.init_db()
 
