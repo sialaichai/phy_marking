@@ -522,7 +522,6 @@ elif auth_type == "class":
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
     # ---------- Submit Work ----------
-    # ---------- Submit Work ----------
     if page == "Submit Work":
         st.header("📸 Submit Your Work")
         
@@ -655,7 +654,6 @@ elif auth_type == "class":
                         st.image(image, caption="Uploaded image", width=300)
                         st.success("✅ Image uploaded! Ready to submit.")
                     
-                    # Determine which image to submit
                     image_to_submit = None
                     if camera_image is not None:
                         image_to_submit = camera_image
@@ -685,13 +683,18 @@ elif auth_type == "class":
                                     question_text = f"Question file: {scheme.get('question_file_name', 'See attachment')}"
                                 
                                 # Grade the submission
-                                grade, feedback_table, overall_feedback = grading.grade_work(
+                                grade, feedback_table, overall_feedback, extracted_text = grading.grade_work(
                                     img_bytes, 
                                     question_text,
                                     scheme["rubric"], 
                                     scheme["total_points"],
                                     use_real_api=True
                                 )
+                                
+                                # ---- Show extracted text for debugging ----
+                                with st.expander("🔍 Debug: Extracted Text"):
+                                    st.write(f"**Length:** {len(extracted_text) if extracted_text else 0} characters")
+                                    st.code(extracted_text if extracted_text else "No text extracted")
                                 
                                 feedback_json = json.dumps({
                                     "overall_feedback": overall_feedback,
@@ -718,7 +721,7 @@ elif auth_type == "class":
                                         for row in feedback_table:
                                             mark_val = row.get('mark', 0)
                                             numeric_mark = extract_numeric_mark(mark_val)
-                                            email_feedback += f"- {numeric_mark}: {row.get('rationale', 'No rationale')}\n"
+                                            email_feedback += f"- {numeric_mark}: {row.get('rubric', 'No rubric')}\n"
                                         
                                         email_status = email_utils.send_grade_email(
                                             student_email, 
@@ -771,23 +774,6 @@ elif auth_type == "class":
                                     st.info("💡 No email provided. Your grade is shown above.")
                                 
                                 st.caption("Your grade and feedback are private and only visible to you and your teacher.")
-                
-                # ---- TEST BUTTON - OUTSIDE THE FORM ----
-                # This is placed OUTSIDE the form to avoid widget conflicts
-                if image_to_submit is not None:
-                    if st.button("🔬 Test Image Reading", key="test_image_reading"):
-                        with st.spinner("Testing image reading..."):
-                            try:
-                                img_bytes = image_to_submit.getvalue()
-                                result = grading.test_image_reading(img_bytes)
-                                if result.startswith("ERROR:"):
-                                    st.error(f"❌ {result}")
-                                else:
-                                    st.success("✅ Image read successfully!")
-                                    st.write("**What the API sees:**")
-                                    st.write(result)
-                            except Exception as e:
-                                st.error(f"❌ Test failed: {str(e)}")
     
     # ---------- My Results ----------
     elif page == "My Results":
