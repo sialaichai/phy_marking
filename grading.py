@@ -256,3 +256,13 @@ def simulate_grading(question, rubric, total_points):
 def grade_work(image_bytes, question, rubric, total_points, use_real_api=True):
     """Wrapper for grade_submission."""
     return grade_submission(image_bytes, question, rubric, total_points, use_real_api)
+
+def test_image_reading(image_bytes):
+    """
+    Test function to verify the image can be read.
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        return f"✅ Image loaded: {image.width}x{image.height}, mode: {image.mode}"
+    except Exception as e:
+        return f"❌ Image loading failed: {str(e)}"
