@@ -6,11 +6,37 @@ import re
 from PIL import Image
 import io
 
+# ---- Try to import Tesseract ----
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+
 # ---- Get API key from Streamlit secrets ----
 DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", None)
 
 # ============================================================
-#                    IMAGE PROCESSING
+#                    OCR USING TESSERACT
+# ============================================================
+
+def extract_text_with_tesseract(image_bytes):
+    """Extract text using Tesseract OCR (best for typed text)."""
+    if not TESSERACT_AVAILABLE:
+        return "", "Tesseract not installed. Please install: pip install pytesseract and system Tesseract."
+    
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        # Convert to grayscale for better accuracy
+        image = image.convert('L')
+        # Use Tesseract with English language
+        text = pytesseract.image_to_string(image, lang='eng')
+        return text.strip(), None
+    except Exception as e:
+        return "", f"Tesseract error: {str(e)}"
+
+# ============================================================
+#                    OCR USING DEEPSEEK (FALLBACK)
 # ============================================================
 
 def process_image_for_api(image_bytes):
@@ -27,10 +53,6 @@ def process_image_for_api(image_bytes):
         return buffer.getvalue()
     except Exception as e:
         raise Exception(f"Image processing failed: {str(e)}")
-
-# ============================================================
-#                    API CALLS
-# ============================================================
 
 def call_deepseek_api(image_bytes, prompt_text):
     """Call DeepSeek API with image embedded as Markdown."""
@@ -72,6 +94,52 @@ def call_deepseek_api(image_bytes, prompt_text):
     except Exception as e:
         return f"ERROR: {str(e)}"
 
+def extract_text_from_image_deepseek(image_bytes):
+    """Extract text using DeepSeek API (fallback)."""
+    prompt = """Transcribe the text in this image exactly as it appears. 
+Do not add any extra text, do not explain, do not define terms.
+Return only the text you see, preserving line breaks and numbered lists.
+"""
+    response = call_deepseek_api(image_bytes, prompt)
+    if response.startswith("ERROR:"):
+        return "", response
+    return response.strip(), None
+
+# ============================================================
+#                    MAIN OCR FUNCTION
+# ============================================================
+
+def extract_text_from_image(image_bytes):
+    """
+    Extract text from image.
+    First tries Tesseract (for typed text), falls back to DeepSeek.
+    """
+    # Try Tesseract first (more reliable for typed text)
+    text, error = extract_text_with_tesseract(image_bytes)
+    
+    if text and len(text) > 10:
+        return text, None
+    
+    # Fallback to DeepSeek
+    return extract_text_from_image_deepseek(image_bytes)
+
+# ============================================================
+#                    TEST OCR FUNCTION
+# ============================================================
+
+def test_image_reading(image_bytes):
+    """Simple test to see what text is extracted from the image."""
+    text, error = extract_text_from_image(image_bytes)
+    if error:
+        return f"ERROR: {error}"
+    if not text:
+        return "No text extracted from image."
+    return text
+
+# ============================================================
+#                    GRADING (TEXT-ONLY)
+# ============================================================
+
 def call_deepseek_text_only(prompt_text):
     """Call DeepSeek API without image (text only)."""
     if not DEEPSEEK_API_KEY:
@@ -95,60 +163,6 @@ def call_deepseek_text_only(prompt_text):
         if response.status_code != 200:
             return f"ERROR: {response.status_code} - {response.text[:200]}"
         return response.json()['choices'][0]['message']['content']
-    except Exception as e:
-        return f"ERROR: {str(e)}"
-
-# ============================================================
-#                    OCR (TEXT EXTRACTION)
-# ============================================================
-
-def extract_text_from_image(image_bytes):
-    """Extract text from image using OCR."""
-    prompt = """Extract ALL text from this image. This is a student's answer.
-Return ONLY the text you see in the image, nothing else.
-Do not add any extra text or explanations.
-"""
-    response = call_deepseek_api(image_bytes, prompt)
-    if response.startswith("ERROR:"):
-        return "", response
-    return response.strip(), None
-
-# ============================================================
-#                    TEST OCR FUNCTION
-# ============================================================
-
-def test_image_reading(image_bytes):
-    """Simple test to see what the API reads from the image."""
-    if not DEEPSEEK_API_KEY:
-        return "ERROR: No DeepSeek API key found."
-    
-    try:
-        processed = process_image_for_api(image_bytes)
-        base64_image = base64.b64encode(processed).decode('utf-8')
-        
-        url = "https://api.deepseek.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        prompt = "What text do you see in this image? Return ONLY the exact text you see, nothing else."
-        full_prompt = f"{prompt}\n\n![image](data:image/jpeg;base64,{base64_image})"
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": full_prompt}],
-            "max_tokens": 500,
-            "temperature": 0.0
-        }
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        if response.status_code != 200:
-            return f"ERROR: API returned {response.status_code} - {response.text[:200]}"
-        
-        result = response.json()
-        return result['choices'][0]['message']['content']
-        
     except Exception as e:
         return f"ERROR: {str(e)}"
 
