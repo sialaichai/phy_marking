@@ -660,6 +660,19 @@ elif auth_type == "class":
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
                     
+                    # ---- TEST OCR BUTTON ----
+                    if image_to_submit is not None:
+                        if st.button("🔬 Test: What text is in this image?"):
+                            with st.spinner("Testing OCR..."):
+                                img_bytes = image_to_submit.getvalue()
+                                result = grading.test_image_reading(img_bytes)
+                                if result.startswith("ERROR:"):
+                                    st.error(f"❌ {result}")
+                                else:
+                                    st.success("✅ Test complete!")
+                                    st.write("**Extracted text:**")
+                                    st.code(result)
+                    
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
                         "📨 Submit for Grading",
