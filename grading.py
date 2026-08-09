@@ -3,338 +3,265 @@ import requests
 import base64
 import json
 import re
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 import io
 
-# ---- Debug: confirm file is loaded (remove after testing) ----
-print("===== grading.py LOADED =====")
+# ---- Try to import Tesseract ----
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
 
 # ---- Get API key from Streamlit secrets ----
 DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", None)
 
-# ============================================================
-#                    TEST API
-# ============================================================
-
-def test_deepseek_api():
-    """Test the DeepSeek API connection with a simple prompt."""
-    if not DEEPSEEK_API_KEY:
-        return "ERROR: No API key found"
-    
-    url = "https://api.deepseek.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [
-            {"role": "user", "content": "Say 'Hello' in one word."}
-        ],
-        "max_tokens": 5,
-        "temperature": 0.1
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            reply = result['choices'][0]['message']['content']
-            return f"✅ API works! Response: '{reply}'"
-        else:
-            return f"❌ API error: {response.status_code} - {response.text[:100]}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
+print("===== grading.py LOADED (Tesseract mode) =====")
 
 # ============================================================
-#                    IMAGE PROCESSING
+#                    IMAGE PREPROCESSING (for OCR)
 # ============================================================
 
-def process_image_for_api(image_bytes):
+def preprocess_for_ocr(image_bytes):
     """
-    Process and optimize image for DeepSeek API.
-    Returns properly encoded image bytes.
+    Preprocess image to improve OCR accuracy.
+    Works for both typed and camera images.
     """
     try:
-        # Open image
         image = Image.open(io.BytesIO(image_bytes))
         
-        # Convert to RGB if needed
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+        # Convert to grayscale
+        if image.mode != 'L':
+            image = image.convert('L')
         
-        # Resize if too large (max dimensions 1024x1024)
-        max_size = 1024
+        # Enhance contrast
+        enhancer = ImageEnhance.Contrast(image)
+        image = enhancer.enhance(2.0)
+        
+        # Sharpen
+        image = image.filter(ImageFilter.SHARPEN)
+        
+        # Binarize (convert to black and white)
+        threshold = 150
+        image = image.point(lambda p: 255 if p > threshold else 0)
+        
+        # Resize if too large (Tesseract works best at ~300 DPI)
+        max_size = 2000
         if image.width > max_size or image.height > max_size:
             image.thumbnail((max_size, max_size), Image.LANCZOS)
         
-        # Save as JPEG with compression
+        # Save to bytes
         buffer = io.BytesIO()
-        image.save(buffer, format='JPEG', quality=80, optimize=True)
-        processed_bytes = buffer.getvalue()
-        
-        # Check size - if still > 4MB, reduce quality further
-        if len(processed_bytes) > 4 * 1024 * 1024:  # 4MB
-            buffer = io.BytesIO()
-            image.save(buffer, format='JPEG', quality=50, optimize=True)
-            processed_bytes = buffer.getvalue()
-        
-        return processed_bytes
+        image.save(buffer, format='PNG')
+        return buffer.getvalue()
         
     except Exception as e:
-        raise Exception(f"Image processing failed: {str(e)}")
+        # If preprocessing fails, return original bytes
+        return image_bytes
 
 # ============================================================
-#                    ANALYZE IMAGE WITH DEEPSEEK
+#                    OCR USING TESSERACT
 # ============================================================
 
-def analyze_image_with_deepseek(image_bytes, prompt_text):
+def extract_text_with_tesseract(image_bytes):
     """
-    Send an image to DeepSeek model for analysis.
+    Extract text using Tesseract OCR with preprocessing.
+    Handles both typed and camera images.
     """
+    if not TESSERACT_AVAILABLE:
+        return "", "Tesseract not installed. Please add pytesseract to requirements.txt and install system Tesseract."
+    
+    try:
+        # Preprocess
+        processed_bytes = preprocess_for_ocr(image_bytes)
+        image = Image.open(io.BytesIO(processed_bytes))
+        
+        # Use Tesseract with configuration for English text
+        custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.,;:()[]{}!?@#$%^&*+-=/_\\ ' 
+        text = pytesseract.image_to_string(image, lang='eng', config=custom_config)
+        
+        # Clean up extra whitespace
+        text = '\n'.join([line.strip() for line in text.splitlines() if line.strip()])
+        return text, None
+    except Exception as e:
+        return "", f"Tesseract error: {str(e)}"
+
+# ============================================================
+#                    DEEPSEEK TEXT-ONLY API
+# ============================================================
+
+def call_deepseek_text_only(prompt_text):
+    """Call DeepSeek API without image (text only)."""
     if not DEEPSEEK_API_KEY:
-        return "ERROR: DeepSeek API key not found. Please add it to secrets."
+        return "ERROR: No API key."
     
-    # Step 1: Process and optimize image
-    try:
-        processed_bytes = process_image_for_api(image_bytes)
-    except Exception as e:
-        return f"ERROR: {str(e)}"
-    
-    # Step 2: Convert to Base64
-    try:
-        base64_image = base64.b64encode(processed_bytes).decode('utf-8')
-    except Exception as e:
-        return f"ERROR: Base64 encoding failed: {str(e)}"
-    
-    # Step 3: Prepare API request
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Step 4: Build payload with image as markdown
-    image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image. ONLY analyze this image for the student's work:\n{image_markdown}"
-    
     payload = {
         "model": "deepseek-chat",
-        "messages": [
-            {
-                "role": "user",
-                "content": full_prompt
-            }
-        ],
+        "messages": [{"role": "user", "content": prompt_text}],
         "max_tokens": 1500,
-        "temperature": 0.2
+        "temperature": 0.0
     }
     
-    # Step 5: Send request
     try:
-        response = requests.post(
-            url, 
-            headers=headers, 
-            json=payload, 
-            timeout=60
-        )
-        
-        # Handle specific error codes
-        if response.status_code == 400:
-            error_detail = response.json() if response.text else {}
-            error_msg = error_detail.get('error', {}).get('message', 'Unknown error')
-            return f"ERROR: Bad Request - {error_msg}"
-        elif response.status_code == 401:
-            return "ERROR: Invalid API key. Please check your DeepSeek API key in secrets."
-        elif response.status_code == 429:
-            return "ERROR: Rate limit exceeded. Please wait a few minutes and try again."
-        elif response.status_code == 500:
-            return "ERROR: DeepSeek server error. Please try again later."
-        
-        response.raise_for_status()
-        
-        result = response.json()
-        return result['choices'][0]['message']['content']
-        
-    except requests.exceptions.Timeout:
-        return "ERROR: Request timed out. Please try again with a smaller image."
-    except requests.exceptions.RequestException as e:
-        return f"ERROR: API request failed: {str(e)}"
-    except (KeyError, IndexError) as e:
-        return f"ERROR: Unexpected API response structure: {str(e)}"
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        if response.status_code != 200:
+            return f"ERROR: {response.status_code} - {response.text[:200]}"
+        return response.json()['choices'][0]['message']['content']
+    except Exception as e:
+        return f"ERROR: {str(e)}"
 
 # ============================================================
-#                    GRADE SUBMISSION (MAIN)
+#                    TEST OCR FUNCTION (for app.py)
+# ============================================================
+
+def test_image_reading(image_bytes):
+    """Test OCR on an image and return extracted text."""
+    text, error = extract_text_with_tesseract(image_bytes)
+    if error:
+        return f"ERROR: {error}"
+    if not text:
+        return "No text extracted."
+    return text
+
+# ============================================================
+#                    MAIN GRADING FUNCTION
 # ============================================================
 
 def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
     """
-    Grade a student's answer using DeepSeek API with clean numeric marks.
-    This is the main function called from app.py.
+    Grade student submission.
+    Step 1: Extract text with Tesseract
+    Step 2: Grade with DeepSeek text-only API
+    Returns: (score, feedback_table, overall_feedback)
     """
-    # If API is disabled or key missing, use simulation
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grade(question, rubric, "", total_points)
     
-    # Construct grading prompt with clear separation
-    prompt = f"""You are a strict teacher. Grade the student's answer based ONLY on the rubric provided.
+    # STEP 1: Extract text from image
+    student_text, error = extract_text_with_tesseract(image_bytes)
+    
+    if error:
+        return 0, [{"mark": 0, "rationale": f"OCR failed: {error}"}], f"OCR Error: {error}"
+    
+    if not student_text or len(student_text) < 5:
+        return 0, [{"mark": 0, "rationale": "No text could be extracted from the image. Please ensure the image is clear and well-lit."}], "No text extracted."
+    
+    # STEP 2: Grade using text-only API
+    grading_prompt = f"""You are a strict teacher. Grade the student's answer based on the rubric.
 
-**IMPORTANT - READ CAREFULLY:**
-1. The rubric below is the MARKING SCHEME - it's what the teacher expects.
-2. The student's answer is in the ATTACHED IMAGE.
-3. DO NOT use the rubric text as the student's answer. ONLY analyze what's in the image.
+**STUDENT'S ANSWER (extracted from image):**
+{student_text}
 
-**Question:**
+**QUESTION:**
 {question}
 
-**MARKING RUBRIC (This is the teacher's marking scheme, NOT the student's answer):**
+**RUBRIC:**
 {rubric}
 
-**Total Points Available:** {total_points}
+**TOTAL POINTS:** {total_points}
 
-**THE STUDENT'S ANSWER IS IN THE ATTACHED IMAGE. ONLY ANALYZE THE IMAGE CONTENT.**
+**Instructions:**
+1. Compare the student's answer to the rubric.
+2. Award points based on what the student wrote.
+3. Provide a clear rationale for each mark.
 
-**Your task:**
-1. Look at the image and read the student's handwriting/typed answer.
-2. Compare what the student wrote against each criterion in the rubric.
-3. Award points based on what the student actually wrote.
-
-**OUTPUT FORMAT - JSON ONLY:**
+**Return JSON ONLY:**
 {{
-    "total_score": <total points awarded out of {total_points}>,
+    "total_score": <number between 0 and {total_points}>,
     "feedback_table": [
         {{
-            "mark": <ONLY THE NUMBER of points awarded for this criterion, e.g., 1, 2, 0>,
-            "rationale": "<Explain specifically what the student wrote and why they got/didn't get this point. Reference the student's actual words from the image.>"
-        }},
-        ... (one entry for each rubric criterion)
+            "mark": <numeric points for this criterion>,
+            "rationale": "<explanation based on the student's answer>"
+        }}
     ],
-    "overall_feedback": "<Short summary of strengths and areas for improvement>"
+    "overall_feedback": "<summary>"
 }}
 
-**CRITICAL RULES TO PREVENT CONFUSION:**
-- The rubric is NOT the student's answer. It's the marking scheme.
-- Only read the student's answer from the IMAGE.
-- Do NOT repeat the rubric wording in the "mark" field.
-- The "mark" field must contain ONLY a number (e.g., 1, 2, 0).
-- The "rationale" should reference specific things the student actually wrote in the image.
-- If the student wrote something that matches the rubric, award the points and quote what they wrote.
-- If the student didn't write something, explain what was missing.
+**Important:**
+- The student's answer is quoted above. ONLY use that.
+- Each rubric criterion gets one row.
+- The mark must be a number only.
+- Do NOT quote the rubric as the student's answer.
 """
-
-    # Call API
-    response_text = analyze_image_with_deepseek(image_bytes, prompt)
     
-    # Check for errors
-    if response_text.startswith("ERROR:"):
-        return 0, [], f"ERROR: {response_text}"
+    response = call_deepseek_text_only(grading_prompt)
     
-    # Parse JSON response
+    if response.startswith("ERROR:"):
+        return 0, [{"mark": 0, "rationale": response}], f"API Error: {response}"
+    
+    # Parse JSON
     try:
-        # Clean the response (remove markdown code blocks)
-        cleaned_text = response_text.strip()
-        if "```json" in cleaned_text:
-            cleaned_text = re.search(r"```json\s*(.*?)\s*```", cleaned_text, re.DOTALL)
-            if cleaned_text:
-                cleaned_text = cleaned_text.group(1)
-        elif "```" in cleaned_text:
-            cleaned_text = re.search(r"```\s*(.*?)\s*```", cleaned_text, re.DOTALL)
-            if cleaned_text:
-                cleaned_text = cleaned_text.group(1)
+        clean = response.strip()
+        if "```json" in clean:
+            match = re.search(r"```json\s*(.*?)\s*```", clean, re.DOTALL)
+            if match:
+                clean = match.group(1)
+        elif "```" in clean:
+            match = re.search(r"```\s*(.*?)\s*```", clean, re.DOTALL)
+            if match:
+                clean = match.group(1)
         
-        # Parse JSON
-        result = json.loads(cleaned_text)
-        total_score = result.get("total_score", 0)
-        feedback_table = result.get("feedback_table", [])
-        overall_feedback = result.get("overall_feedback", "No overall feedback provided.")
+        data = json.loads(clean)
+        score = int(data.get("total_score", 0))
+        feedback_table = data.get("feedback_table", [])
+        overall_feedback = data.get("overall_feedback", "No summary.")
         
-        # Ensure total_score is valid
-        try:
-            total_score = int(total_score)
-        except (ValueError, TypeError):
-            total_score = 0
-            
-        # Clamp score to valid range
-        if total_score < 0:
-            total_score = 0
-        elif total_score > total_points:
-            total_score = total_points
+        if score < 0:
+            score = 0
+        elif score > total_points:
+            score = total_points
         
-        # Validate and clean feedback_table
-        if not feedback_table or not isinstance(feedback_table, list):
-            feedback_table = [
-                {"mark": 0, "rationale": "No detailed breakdown available."}
-            ]
-        
-        # Clean each row - ensure mark is numeric ONLY
+        # Clean table
         cleaned_table = []
         for row in feedback_table:
-            # Get the mark value
             mark_val = row.get("mark", 0)
-            
-            # Force clean to numeric only
             if isinstance(mark_val, (int, float)):
-                numeric_mark = mark_val
+                numeric_mark = str(mark_val)
             elif isinstance(mark_val, str):
-                # Try to extract ONLY the number
-                match = re.search(r'^(\d+(?:\.\d+)?)', mark_val.strip())
-                if match:
-                    numeric_mark = float(match.group(1))
-                else:
-                    numeric_mark = 0
+                match = re.search(r'(\d+(?:\.\d+)?)', mark_val)
+                numeric_mark = match.group(1) if match else "0"
             else:
-                numeric_mark = 0
-            
-            # Ensure it's an integer or simple decimal
-            if numeric_mark == int(numeric_mark):
-                numeric_mark = int(numeric_mark)
-            
-            # Get rationale and clean it
-            rationale = row.get("rationale", "No rationale provided.")
-            # Remove any "rubric says" or similar phrases
-            rationale = re.sub(r'(?:the\s+)?rubric\s+(?:says|states|mentions|indicates|has)\s+', '', rationale, flags=re.IGNORECASE)
-            rationale = re.sub(r'^\s*\d+\s*mark(s?)\s*(?:for|if|when)\s*', '', rationale, flags=re.IGNORECASE)
-            
+                numeric_mark = "0"
             cleaned_table.append({
                 "mark": numeric_mark,
-                "rationale": rationale.strip()
+                "rationale": row.get("rationale", "No rationale.")
             })
         
-        return total_score, cleaned_table, overall_feedback
+        return score, cleaned_table, overall_feedback
         
     except json.JSONDecodeError as e:
-        return 0, [{"mark": 0, "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": "0", "rationale": f"Parse error: {str(e)}"}], f"Error: {str(e)}"
     except Exception as e:
-        return 0, [{"mark": 0, "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": "0", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
 # ============================================================
 #                    SIMULATED GRADE (FALLBACK)
 # ============================================================
 
 def simulate_grade(question, rubric, student_answer, total_points):
-    """Placeholder grading when DeepSeek API is not available."""
-    # Extract keywords from rubric
-    keywords = re.findall(r'\b[a-zA-Z]{3,}\b', rubric)[:5]
+    """Placeholder grading when API not available."""
+    keywords = re.findall(r'\b[a-zA-Z]{3,}\b', rubric)[:3]
     found = sum(1 for kw in keywords if kw.lower() in student_answer.lower())
     score = min(found, total_points)
-    
     feedback_table = []
-    for i, kw in enumerate(keywords[:3]):
+    for kw in keywords[:3]:
         earned = 1 if kw.lower() in student_answer.lower() else 0
         feedback_table.append({
             "mark": earned,
-            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer: '{kw}'"
+            "rationale": f"{'✓ Found' if earned else '✗ Not found'} in student answer."
         })
-    
-    overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords."
-    return score, feedback_table, overall_feedback
+    return score, feedback_table, "Simulated grading."
 
 # ============================================================
 #                    LEGACY / ALIAS
 # ============================================================
 
-# For backward compatibility, ensure grade_work also exists
 def grade_work(image_bytes, question, rubric, total_points, use_real_api=True):
-    """Alias for grade_submission (for compatibility with older app versions)."""
+    """Alias for grade_submission."""
     return grade_submission(image_bytes, question, rubric, total_points, use_real_api)
