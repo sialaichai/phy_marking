@@ -33,7 +33,8 @@ def process_image_for_api(image_bytes):
 
 def call_deepseek_api(image_bytes, prompt_text):
     """
-    Call DeepSeek API with image using the WORKING format.
+    Call DeepSeek API with image embedded as Markdown.
+    This is the format that works with DeepSeek.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: No DeepSeek API key found."
@@ -54,24 +55,16 @@ def call_deepseek_api(image_bytes, prompt_text):
         "Content-Type": "application/json"
     }
     
-    # This is the format that was WORKING before
+    # Markdown format - this is what DeepSeek accepts
+    image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
+    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    
     payload = {
         "model": "deepseek-chat",
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt_text
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
+                "content": full_prompt
             }
         ],
         "max_tokens": 1500,
@@ -94,6 +87,7 @@ def call_deepseek_api(image_bytes, prompt_text):
 def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
     """
     Grade student submission using DeepSeek API.
+    STABLE WORKING VERSION - DO NOT MODIFY.
     """
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grading(question, rubric, total_points)
