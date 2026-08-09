@@ -34,7 +34,7 @@ def extract_numeric_mark(mark_val):
 def display_feedback_table(feedback_table):
     """
     Display feedback as a clean single-column list.
-    Each card shows: Mark, Rubric, Rationale.
+    Each card shows: Mark and Rubric only.
     No horizontal scrolling on mobile.
     """
     if not feedback_table or len(feedback_table) == 0:
@@ -44,11 +44,9 @@ def display_feedback_table(feedback_table):
     for i, row in enumerate(feedback_table):
         mark_val = row.get('mark', '0')
         rubric_text = row.get('rubric', '')
-        rationale = row.get('rationale', 'No rationale provided.')
         
         # Escape special characters for HTML
         rubric_text = rubric_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        rationale = rationale.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         
         # Alternating background colors
         bg_color = '#f9f9f9' if i % 2 == 0 else '#ffffff'
@@ -66,9 +64,6 @@ def display_feedback_table(feedback_table):
             </div>
             <div style="font-size: 13px; color: #666; margin-top: 4px; font-weight: bold;">
                 Rubric: <span style="font-weight: normal; color: #333;">{rubric_text if rubric_text else 'N/A'}</span>
-            </div>
-            <div style="font-size: 14px; color: #333; margin-top: 4px; line-height: 1.5;">
-                <span style="font-weight: bold;">Rationale:</span> {rationale}
             </div>
         </div>
         """, unsafe_allow_html=True)
