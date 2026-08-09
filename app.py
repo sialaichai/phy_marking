@@ -665,29 +665,6 @@ elif auth_type == "class":
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
                     
-                    # ---- Debug: Test image and API ----
-                    if image_to_submit is not None:
-                        # Test image loading
-                        try:
-                            test_result = grading.test_image_reading(image_to_submit.getvalue())
-                            st.caption(f"📷 {test_result}")
-                        except Exception as e:
-                            st.caption(f"📷 Image test: {str(e)}")
-                        
-                        # Test API button
-                        if st.button("🔬 Test API - Describe Image"):
-                            with st.spinner("Testing..."):
-                                img_bytes = image_to_submit.getvalue()
-                                result = grading.call_deepseek_api(
-                                    img_bytes, 
-                                    "Describe what you see in this image in 2 sentences."
-                                )
-                                if result.startswith("ERROR:"):
-                                    st.error(result)
-                                else:
-                                    st.write("**API Response:**")
-                                    st.write(result)
-                    
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
                         "📨 Submit for Grading",
@@ -713,7 +690,7 @@ elif auth_type == "class":
                                 # Grade the submission
                                 grade, feedback_table, overall_feedback = grading.grade_work(
                                     img_bytes, 
-                                    question_text,  # Use question_text, not scheme["question"]
+                                    question_text,
                                     scheme["rubric"], 
                                     scheme["total_points"],
                                     use_real_api=True
