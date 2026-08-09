@@ -6,48 +6,37 @@ import re
 from PIL import Image
 import io
 
-# Get API key from Streamlit secrets
 DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", None)
-
-def process_image_for_api(image_bytes):
-    """
-    Process and optimize image for DeepSeek API.
-    """
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        max_size = 1024
-        if image.width > max_size or image.height > max_size:
-            image.thumbnail((max_size, max_size), Image.LANCZOS)
-        buffer = io.BytesIO()
-        image.save(buffer, format='JPEG', quality=80, optimize=True)
-        processed_bytes = buffer.getvalue()
-        if len(processed_bytes) > 4 * 1024 * 1024:
-            buffer = io.BytesIO()
-            image.save(buffer, format='JPEG', quality=50, optimize=True)
-            processed_bytes = buffer.getvalue()
-        return processed_bytes
-    except Exception as e:
-        raise Exception(f"Image processing failed: {str(e)}")
 
 def call_deepseek_api(image_bytes, prompt_text):
     """
-    Call DeepSeek API with image embedded as Markdown.
-    This is the format that works with DeepSeek.
+    Call DeepSeek API with image.
+    Using the format from DeepSeek documentation.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: No DeepSeek API key found."
     
     try:
-        processed_bytes = process_image_for_api(image_bytes)
-    except Exception as e:
-        return f"ERROR: {str(e)}"
-    
-    try:
+        # Open and process image
+        image = Image.open(io.BytesIO(image_bytes))
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Resize if too large
+        max_size = 1024
+        if image.width > max_size or image.height > max_size:
+            image.thumbnail((max_size, max_size), Image.LANCZOS)
+        
+        # Save as JPEG
+        buffer = io.BytesIO()
+        image.save(buffer, format='JPEG', quality=80, optimize=True)
+        processed_bytes = buffer.getvalue()
+        
+        # Convert to Base64
         base64_image = base64.b64encode(processed_bytes).decode('utf-8')
+        
     except Exception as e:
-        return f"ERROR: Base64 encoding failed: {str(e)}"
+        return f"ERROR: Image processing failed: {str(e)}"
     
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
@@ -55,9 +44,15 @@ def call_deepseek_api(image_bytes, prompt_text):
         "Content-Type": "application/json"
     }
     
-    # Markdown format - this is what DeepSeek accepts
-    image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    # DeepSeek expects the image as a data URL
+    data_url = f"data:image/jpeg;base64,{base64_image}"
+    
+    # Build the prompt with the image
+    full_prompt = f"""{prompt_text}
+
+The student's answer is in the image below:
+![image]({data_url})
+"""
     
     payload = {
         "model": "deepseek-chat",
@@ -74,7 +69,7 @@ def call_deepseek_api(image_bytes, prompt_text):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         if response.status_code != 200:
-            return f"ERROR: API returned {response.status_code} - {response.text[:200]}"
+            return f"ERROR: API returned {response.status_code} - {response.text[:300]}"
         result = response.json()
         return result['choices'][0]['message']['content']
     except requests.exceptions.Timeout:
@@ -86,44 +81,45 @@ def call_deepseek_api(image_bytes, prompt_text):
 
 def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
     """
-    Grade student submission using DeepSeek API.
-    STABLE WORKING VERSION - DO NOT MODIFY.
+    Grade student submission.
     """
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grading(question, rubric, total_points)
     
-    prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
+    prompt = f"""You are a strict teacher. Grade the student's answer.
 
 **Question:**
 {question}
 
-**Marking Rubric / Expected Answer:**
+**Marking Rubric:**
 {rubric}
 
 **Total Points:** {total_points}
 
-**Student's Answer:** (See the uploaded image. Read and analyze all text from it.)
+**Instructions:**
+1. Look at the image below.
+2. Read the student's answer from the image.
+3. Award marks based on the rubric.
+4. Return JSON only.
 
-Please respond with valid JSON ONLY in the following format:
-
+**Output format:**
 {{
-    "total_score": <total points awarded out of {total_points}>,
+    "total_score": <number between 0 and {total_points}>,
     "feedback_table": [
         {{
-            "mark": "<numeric point value for this criterion>",
-            "rubric": "<the rubric criterion this refers to>",
-            "rationale": "<detailed explanation of why this mark was awarded or not>"
+            "mark": "<number>",
+            "rubric": "<the rubric criterion>",
+            "rationale": "<explanation based on what the student wrote>"
         }}
     ],
-    "overall_feedback": "<general feedback on the student's answer>"
+    "overall_feedback": "<summary>"
 }}
 
 Rules:
-- The total_score must be an integer between 0 and {total_points}.
-- Each criterion from the rubric should have its own row in the feedback_table.
-- The "mark" field should ONLY be a number (e.g., "1", "2", "0").
-- The "rubric" field should be the specific rubric criterion.
-- Be fair and consistent with the rubric.
+- The total_score must be an integer.
+- Each rubric criterion gets one row in feedback_table.
+- The mark field must be a number only.
+- Base your grading on what the student actually wrote.
 """
 
     response_text = call_deepseek_api(image_bytes, prompt)
@@ -146,7 +142,7 @@ Rules:
         
         total_score = int(data.get("total_score", 0))
         feedback_table = data.get("feedback_table", [])
-        overall_feedback = data.get("overall_feedback", "No overall feedback provided.")
+        overall_feedback = data.get("overall_feedback", "No overall feedback.")
         
         if total_score < 0:
             total_score = 0
@@ -154,7 +150,7 @@ Rules:
             total_score = total_points
         
         if not feedback_table or not isinstance(feedback_table, list):
-            feedback_table = [{"mark": "0", "rubric": "Overall", "rationale": "No detailed breakdown available."}]
+            feedback_table = [{"mark": "0", "rubric": "Overall", "rationale": "No breakdown."}]
         
         cleaned_table = []
         for row in feedback_table:
@@ -171,7 +167,7 @@ Rules:
                 numeric_mark = "0"
             
             rubric_text = row.get("rubric", "")
-            rationale = row.get("rationale", "No rationale provided.")
+            rationale = row.get("rationale", "No rationale.")
             
             cleaned_table.append({
                 "mark": numeric_mark,
@@ -182,12 +178,12 @@ Rules:
         return total_score, cleaned_table, overall_feedback
         
     except json.JSONDecodeError as e:
-        return 0, [{"mark": "0", "rubric": "Error", "rationale": f"Failed to parse response: {str(e)}"}], f"Error: {str(e)}"
+        return 0, [{"mark": "0", "rubric": "Error", "rationale": f"Parse error: {response_text[:200]}"}], f"Error: {str(e)}"
     except Exception as e:
         return 0, [{"mark": "0", "rubric": "Error", "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
 def simulate_grading(question, rubric, total_points):
-    """Simulated grading when API is not available."""
+    """Simulated grading."""
     if total_points >= 3:
         score = 2
         table = [
