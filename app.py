@@ -660,19 +660,6 @@ elif auth_type == "class":
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
                     
-                    # ---- TEST OCR BUTTON ----
-                    if image_to_submit is not None:
-                        if st.button("🔬 Test: What text is in this image?"):
-                            with st.spinner("Testing OCR..."):
-                                img_bytes = image_to_submit.getvalue()
-                                result = grading.test_image_reading(img_bytes)
-                                if result.startswith("ERROR:"):
-                                    st.error(f"❌ {result}")
-                                else:
-                                    st.success("✅ Test complete!")
-                                    st.write("**Extracted text:**")
-                                    st.code(result)
-                    
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
                         "📨 Submit for Grading",
@@ -787,6 +774,19 @@ elif auth_type == "class":
                                     st.info("💡 No email provided. Your grade is shown above.")
                                 
                                 st.caption("Your grade and feedback are private and only visible to you and your teacher.")
+                
+                # ---- TEST OCR BUTTON - OUTSIDE THE FORM ----
+                if image_to_submit is not None:
+                    if st.button("🔬 Test: What text is in this image?", key="test_ocr_button"):
+                        with st.spinner("Testing OCR..."):
+                            img_bytes = image_to_submit.getvalue()
+                            result = grading.test_image_reading(img_bytes)
+                            if result.startswith("ERROR:"):
+                                st.error(f"❌ {result}")
+                            else:
+                                st.success("✅ Test complete!")
+                                st.write("**Extracted text:**")
+                                st.code(result)
     
     # ---------- My Results ----------
     elif page == "My Results":
