@@ -34,7 +34,7 @@ def extract_numeric_mark(mark_val):
 def display_feedback_table(feedback_table):
     """
     Display feedback as a clean single-column list.
-    Each card shows: Mark and Rubric only.
+    Each card shows: Mark and Rationale.
     No horizontal scrolling on mobile.
     """
     if not feedback_table or len(feedback_table) == 0:
@@ -43,10 +43,10 @@ def display_feedback_table(feedback_table):
     
     for i, row in enumerate(feedback_table):
         mark_val = row.get('mark', '0')
-        rubric_text = row.get('rubric', '')
+        rationale = row.get('rationale', 'No rationale provided.')
         
         # Escape special characters for HTML
-        rubric_text = rubric_text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        rationale = rationale.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         
         # Alternating background colors
         bg_color = '#f9f9f9' if i % 2 == 0 else '#ffffff'
@@ -62,8 +62,8 @@ def display_feedback_table(feedback_table):
             <div style="font-size: 18px; font-weight: bold; color: #4CAF50;">
                 Mark: {mark_val}
             </div>
-            <div style="font-size: 13px; color: #666; margin-top: 4px; font-weight: bold;">
-                Rubric: <span style="font-weight: normal; color: #333;">{rubric_text if rubric_text else 'N/A'}</span>
+            <div style="font-size: 14px; color: #333; margin-top: 4px; line-height: 1.5;">
+                {rationale}
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -682,19 +682,14 @@ elif auth_type == "class":
                                 if not question_text and scheme.get('question_file_data'):
                                     question_text = f"Question file: {scheme.get('question_file_name', 'See attachment')}"
                                 
-                                # Grade the submission
-                                grade, feedback_table, overall_feedback, extracted_text = grading.grade_work(
+                                # ---- GRADE USING THE WORKING grading.py ----
+                                grade, feedback_table, overall_feedback = grading.grade_submission(
                                     img_bytes, 
                                     question_text,
                                     scheme["rubric"], 
                                     scheme["total_points"],
                                     use_real_api=True
                                 )
-                                
-                                # ---- Show extracted text for debugging ----
-                                with st.expander("🔍 Debug: Extracted Text"):
-                                    st.write(f"**Length:** {len(extracted_text) if extracted_text else 0} characters")
-                                    st.code(extracted_text if extracted_text else "No text extracted")
                                 
                                 feedback_json = json.dumps({
                                     "overall_feedback": overall_feedback,
@@ -721,7 +716,7 @@ elif auth_type == "class":
                                         for row in feedback_table:
                                             mark_val = row.get('mark', 0)
                                             numeric_mark = extract_numeric_mark(mark_val)
-                                            email_feedback += f"- {numeric_mark}: {row.get('rubric', 'No rubric')}\n"
+                                            email_feedback += f"- {numeric_mark}: {row.get('rationale', 'No rationale')}\n"
                                         
                                         email_status = email_utils.send_grade_email(
                                             student_email, 
@@ -775,18 +770,14 @@ elif auth_type == "class":
                                 
                                 st.caption("Your grade and feedback are private and only visible to you and your teacher.")
                 
-                # ---- TEST OCR BUTTON - OUTSIDE THE FORM ----
-                if image_to_submit is not None:
-                    if st.button("🔬 Test: What text is in this image?", key="test_ocr_button"):
-                        with st.spinner("Testing OCR..."):
-                            img_bytes = image_to_submit.getvalue()
-                            result = grading.test_image_reading(img_bytes)
-                            if result.startswith("ERROR:"):
-                                st.error(f"❌ {result}")
-                            else:
-                                st.success("✅ Test complete!")
-                                st.write("**Extracted text:**")
-                                st.code(result)
+                # ---- OPTIONAL: Test API button (outside form) ----
+                if st.button("🧪 Test DeepSeek API", key="test_api_button"):
+                    with st.spinner("Testing API..."):
+                        result = grading.test_deepseek_api()
+                        if result.startswith("ERROR:"):
+                            st.error(result)
+                        else:
+                            st.success(result)
     
     # ---------- My Results ----------
     elif page == "My Results":
