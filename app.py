@@ -660,10 +660,34 @@ elif auth_type == "class":
                         st.success("✅ Image uploaded! Ready to submit.")
                     
                     image_to_submit = None
+                    
                     if camera_image is not None:
                         image_to_submit = camera_image
+                                                # Test button - this tests if the API can read the image
+                        if st.button("🔬 Test Image Reading"):
+                            with st.spinner("Testing image reading..."):
+                                img_bytes = image_to_submit.getvalue()
+                                result = grading.test_image_reading(img_bytes)
+                                if result.startswith("ERROR:"):
+                                    st.error(f"❌ {result}")
+                                else:
+                                    st.success("✅ Image read successfully!")
+                                    st.write("**What the API sees:**")
+                                    st.write(result)
+                                    
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
+                            # Test button - this tests if the API can read the image
+                        if st.button("🔬 Test Image Reading"):
+                            with st.spinner("Testing image reading..."):
+                                img_bytes = image_to_submit.getvalue()
+                                result = grading.test_image_reading(img_bytes)
+                                if result.startswith("ERROR:"):
+                                    st.error(f"❌ {result}")
+                                else:
+                                    st.success("✅ Image read successfully!")
+                                    st.write("**What the API sees:**")
+                                    st.write(result)
                     
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
