@@ -673,6 +673,23 @@ elif auth_type == "class":
                             st.error("Please enter your name.")
                         elif image_to_submit is None:
                             st.error("Please take a photo or upload an image of your work.")
+                           # Debug: Test image loading
+                            test_result = grading.test_image_reading(image_to_submit.getvalue())
+                            st.caption(f"📷 {test_result}")
+                            
+                            # Test API with simple request
+                            if st.button("🔬 Test API - Describe Image"):
+                                with st.spinner("Testing..."):
+                                    img_bytes = image_to_submit.getvalue()
+                                    result = grading.call_deepseek_api(
+                                        img_bytes, 
+                                        "Describe what you see in this image in 2 sentences."
+                                    )
+                                    if result.startswith("ERROR:"):
+                                        st.error(result)
+                                    else:
+                                        st.write("**API Response:**")
+                                        st.write(result)
                         else:
                             with st.spinner("Grading..."):
                                 img_bytes = image_to_submit.getvalue()
