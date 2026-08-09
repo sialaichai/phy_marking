@@ -13,49 +13,22 @@ def process_image_for_api(image_bytes):
     Process and optimize image for DeepSeek API.
     """
     try:
-        # Open image
         image = Image.open(io.BytesIO(image_bytes))
-        
-        # Log image details
-        print(f"Image opened: {image.width}x{image.height}, mode: {image.mode}")
-        
-        # Convert to RGB if needed
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        # Resize if too large
         max_size = 1024
         if image.width > max_size or image.height > max_size:
             image.thumbnail((max_size, max_size), Image.LANCZOS)
-            print(f"Image resized to: {image.width}x{image.height}")
-        
-        # Save as JPEG
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG', quality=80, optimize=True)
         processed_bytes = buffer.getvalue()
-        
-        # If still too large, compress more
-        if len(processed_bytes) > 4 * 1024 * 1024:  # 4MB
+        if len(processed_bytes) > 4 * 1024 * 1024:
             buffer = io.BytesIO()
             image.save(buffer, format='JPEG', quality=50, optimize=True)
             processed_bytes = buffer.getvalue()
-        
-        print(f"Image size: {len(processed_bytes)} bytes")
         return processed_bytes
-        
     except Exception as e:
-        print(f"Image processing error: {str(e)}")
         raise Exception(f"Image processing failed: {str(e)}")
-
-def test_image_reading(image_bytes):
-    """
-    Test function to verify the image can be read.
-    """
-    try:
-        image = Image.open(io.BytesIO(image_bytes))
-        return f"✅ Image loaded: {image.width}x{image.height}, mode: {image.mode}"
-    except Exception as e:
-        return f"❌ Image loading failed: {str(e)}"
 
 def call_deepseek_api(image_bytes, prompt_text):
     """
@@ -64,37 +37,29 @@ def call_deepseek_api(image_bytes, prompt_text):
     if not DEEPSEEK_API_KEY:
         return "ERROR: No DeepSeek API key found."
     
-    # Process image
     try:
         processed_bytes = process_image_for_api(image_bytes)
     except Exception as e:
         return f"ERROR: {str(e)}"
     
-    # Convert to Base64
     try:
         base64_image = base64.b64encode(processed_bytes).decode('utf-8')
-        print(f"Base64 encoding successful. Length: {len(base64_image)}")
     except Exception as e:
         return f"ERROR: Base64 encoding failed: {str(e)}"
     
-    # Prepare API request
     url = "https://api.deepseek.com/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     
-    # Embed image as Markdown in the text content
     image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
     full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image. Read the image carefully:\n{image_markdown}"
     
     payload = {
         "model": "deepseek-chat",
         "messages": [
-            {
-                "role": "user",
-                "content": full_prompt
-            }
+            {"role": "user", "content": full_prompt}
         ],
         "max_tokens": 1500,
         "temperature": 0.1
@@ -102,13 +67,10 @@ def call_deepseek_api(image_bytes, prompt_text):
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
-        
         if response.status_code != 200:
             return f"ERROR: API returned {response.status_code} - {response.text[:200]}"
-        
         result = response.json()
         return result['choices'][0]['message']['content']
-        
     except requests.exceptions.Timeout:
         return "ERROR: Request timed out."
     except requests.exceptions.RequestException as e:
@@ -123,55 +85,111 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grading(question, rubric, total_points)
     
-    # Build prompt - simpler and more direct
-    prompt = f"""You are a teacher grading a student's answer. The student's answer is in the image attached to this message.
+    # ================================================================
+    # STEP 1: Extract ONLY the student's text from the image
+    # ================================================================
+    ocr_prompt = """Extract ALL text from this image. This is a student's handwritten or typed answer.
 
-**IMPORTANT: The student's answer is in the IMAGE. Look at the image carefully.**
+Rules:
+- ONLY transcribe what is written in the image.
+- Do NOT add any extra text, explanations, or commentary.
+- Do NOT mention the rubric or grading.
+- Just copy the text exactly as it appears.
+- If you see handwriting, transcribe it as accurately as possible.
+- If you see typed text, copy it exactly.
+- Return ONLY the extracted text, nothing else.
+"""
+    
+    ocr_response = call_deepseek_api(image_bytes, ocr_prompt)
+    
+    if ocr_response.startswith("ERROR:"):
+        return 0, [{"mark": "0", "rationale": f"OCR failed: {ocr_response}"}], "OCR Error"
+    
+    student_text = ocr_response.strip()
+    
+    # If no text was extracted, try a different approach
+    if not student_text or len(student_text) < 5:
+        ocr_prompt_alt = """What is written in this image? Please transcribe the text you see."""
+        ocr_response = call_deepseek_api(image_bytes, ocr_prompt_alt)
+        if not ocr_response.startswith("ERROR:"):
+            student_text = ocr_response.strip()
+    
+    if not student_text or len(student_text) < 5:
+        return 0, [{"mark": "0", "rationale": "No text could be extracted from the image. Please ensure the handwriting is clear and well-lit."}], "No text extracted"
+    
+    # ================================================================
+    # STEP 2: Grade the extracted text (text-only, NO image)
+    # ================================================================
+    grading_prompt = f"""You are a teacher. Grade the student's answer based on the rubric.
 
-**Question:**
-{question}
+**STUDENT'S ANSWER (extracted from image):**
+"{student_text}"
 
-**Marking Rubric:**
+**RUBRIC (marking criteria):**
 {rubric}
+
+**QUESTION:**
+{question}
 
 **Total Points:** {total_points}
 
 **Instructions:**
-1. Look at the attached image.
-2. Read what the student wrote in the image.
-3. Compare it to the rubric.
-4. Award points based on what the student actually wrote.
+1. Compare the STUDENT'S ANSWER to the RUBRIC.
+2. Award points based on what the student wrote.
+3. Be fair and consistent.
 
-**Return ONLY valid JSON in this format:**
+**Return ONLY valid JSON:**
 {{
-    "score": <total points awarded between 0 and {total_points}>,
+    "score": <total points between 0 and {total_points}>,
     "feedback": [
         {{
-            "mark": <points for this criterion>,
+            "criterion": "<brief description of the rubric criterion>",
+            "points": <points awarded for this criterion>,
             "rationale": "<explain why based on the student's answer>"
         }}
     ],
     "summary": "<brief overall feedback>"
 }}
 
-**CRITICAL RULES:**
-- The student's answer is in the IMAGE.
-- Base your grade ONLY on what you read in the image.
-- If the image contains handwriting, read it and grade it.
-- Do NOT say you can't read the image. You can read images.
-- Be specific about what the student wrote.
+**IMPORTANT:**
+- The STUDENT'S ANSWER is quoted above in quotes.
+- ONLY refer to what is in the quotes for grading.
+- Do NOT use the rubric as the student's answer.
 """
-
-    # Call the API
-    response = call_deepseek_api(image_bytes, prompt)
     
-    if response.startswith("ERROR:"):
-        return 0, [{"mark": "0", "rationale": response}], "API Error"
+    # Use text-only API call for grading (no image)
+    url = "https://api.deepseek.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "user", "content": grading_prompt}
+        ],
+        "max_tokens": 1500,
+        "temperature": 0.1
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        if response.status_code != 200:
+            # Fallback: try with image again
+            fallback_response = call_deepseek_api(image_bytes, grading_prompt)
+            if fallback_response.startswith("ERROR:"):
+                return 0, [{"mark": "0", "rationale": f"Grading failed: {fallback_response}"}], "Grading Error"
+            response_text = fallback_response
+        else:
+            result = response.json()
+            response_text = result['choices'][0]['message']['content']
+    except Exception as e:
+        return 0, [{"mark": "0", "rationale": f"Error: {str(e)}"}], "Error"
     
     # Parse JSON response
     try:
-        # Clean response
-        clean = response.strip()
+        clean = response_text.strip()
         if "```json" in clean:
             match = re.search(r"```json\s*(.*?)\s*```", clean, re.DOTALL)
             if match:
@@ -187,18 +205,16 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
         feedback_list = data.get("feedback", [])
         summary = data.get("summary", "No summary provided.")
         
-        # Ensure score is within bounds
         if score < 0:
             score = 0
         elif score > total_points:
             score = total_points
         
-        # Convert to display format
         table = []
         if feedback_list:
             for item in feedback_list:
                 table.append({
-                    "mark": str(item.get("mark", 0)),
+                    "mark": str(item.get("points", 0)),
                     "rationale": item.get("rationale", "No rationale provided.")
                 })
         else:
@@ -207,7 +223,7 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
         return score, table, summary
         
     except json.JSONDecodeError as e:
-        return 0, [{"mark": "0", "rationale": f"Could not parse response: {response[:200]}"}], "Parse Error"
+        return 0, [{"mark": "0", "rationale": f"Parse error: {response_text[:200]}"}], "Parse Error"
     except Exception as e:
         return 0, [{"mark": "0", "rationale": f"Error: {str(e)}"}], "Error"
 
@@ -223,7 +239,6 @@ def simulate_grading(question, rubric, total_points):
     else:
         score = min(1, total_points)
         table = [{"mark": str(score), "rationale": "Simulated grading (API not used)."}]
-    
     return score, table, "Simulated grading (API not available)."
 
 def grade_work(image_bytes, question, rubric, total_points, use_real_api=True):
