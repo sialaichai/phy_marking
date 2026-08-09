@@ -527,6 +527,7 @@ elif auth_type == "class":
     page = st.sidebar.radio("Go to:", ["Submit Work", "My Results"])
 
     # ---------- Submit Work ----------
+    # ---------- Submit Work ----------
     if page == "Submit Work":
         st.header("📸 Submit Your Work")
         
@@ -659,35 +660,12 @@ elif auth_type == "class":
                         st.image(image, caption="Uploaded image", width=300)
                         st.success("✅ Image uploaded! Ready to submit.")
                     
+                    # Determine which image to submit
                     image_to_submit = None
-                    
                     if camera_image is not None:
                         image_to_submit = camera_image
-                        # Test button - this tests if the API can read the image
-                        if st.button("🔬 Test Image Reading"):
-                            with st.spinner("Testing image reading..."):
-                                img_bytes = image_to_submit.getvalue()
-                                result = grading.test_image_reading(img_bytes)
-                                if result.startswith("ERROR:"):
-                                    st.error(f"❌ {result}")
-                                else:
-                                    st.success("✅ Image read successfully!")
-                                    st.write("**What the API sees:**")
-                                    st.write(result)
-                                    
                     elif uploaded_file is not None:
                         image_to_submit = uploaded_file
-                            # Test button - this tests if the API can read the image
-                        if st.button("🔬 Test Image Reading"):
-                            with st.spinner("Testing image reading..."):
-                                img_bytes = image_to_submit.getvalue()
-                                result = grading.test_image_reading(img_bytes)
-                                if result.startswith("ERROR:"):
-                                    st.error(f"❌ {result}")
-                                else:
-                                    st.success("✅ Image read successfully!")
-                                    st.write("**What the API sees:**")
-                                    st.write(result)
                     
                     # ---- SUBMIT BUTTON ----
                     submitted = st.form_submit_button(
@@ -798,6 +776,23 @@ elif auth_type == "class":
                                     st.info("💡 No email provided. Your grade is shown above.")
                                 
                                 st.caption("Your grade and feedback are private and only visible to you and your teacher.")
+                
+                # ---- TEST BUTTON - OUTSIDE THE FORM ----
+                # This is placed OUTSIDE the form to avoid widget conflicts
+                if image_to_submit is not None:
+                    if st.button("🔬 Test Image Reading", key="test_image_reading"):
+                        with st.spinner("Testing image reading..."):
+                            try:
+                                img_bytes = image_to_submit.getvalue()
+                                result = grading.test_image_reading(img_bytes)
+                                if result.startswith("ERROR:"):
+                                    st.error(f"❌ {result}")
+                                else:
+                                    st.success("✅ Image read successfully!")
+                                    st.write("**What the API sees:**")
+                                    st.write(result)
+                            except Exception as e:
+                                st.error(f"❌ Test failed: {str(e)}")
     
     # ---------- My Results ----------
     elif page == "My Results":
