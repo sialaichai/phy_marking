@@ -681,13 +681,14 @@ elif auth_type == "class":
                                 if not question_text and scheme.get('question_file_data'):
                                     question_text = f"Question file: {scheme.get('question_file_name', 'See attachment')}"
                                 
-                                grade, feedback_table, overall_feedback = grading.grade_submission(
+                                grade, feedback_table, overall_feedback = grading.grade_work(
                                     img_bytes, 
-                                    question_text,
+                                    scheme["question"], 
                                     scheme["rubric"], 
                                     scheme["total_points"],
                                     use_real_api=True
                                 )
+
                                 
                                 feedback_json = json.dumps({
                                     "overall_feedback": overall_feedback,
