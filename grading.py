@@ -10,7 +10,7 @@ DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", None)
 
 def process_image_for_api(image_bytes):
     """
-    Process image to the exact format DeepSeek expects.
+    Process and optimize image for DeepSeek API.
     """
     try:
         # Open image
@@ -20,27 +20,34 @@ def process_image_for_api(image_bytes):
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize if too large (DeepSeek recommends max 1024x1024)
+        # Resize if too large
         max_size = 1024
         if image.width > max_size or image.height > max_size:
             image.thumbnail((max_size, max_size), Image.LANCZOS)
         
-        # Save as JPEG with moderate compression
+        # Save as JPEG
         buffer = io.BytesIO()
-        image.save(buffer, format='JPEG', quality=85, optimize=True)
+        image.save(buffer, format='JPEG', quality=80, optimize=True)
         processed_bytes = buffer.getvalue()
+        
+        # If still too large, compress more
+        if len(processed_bytes) > 4 * 1024 * 1024:  # 4MB
+            buffer = io.BytesIO()
+            image.save(buffer, format='JPEG', quality=50, optimize=True)
+            processed_bytes = buffer.getvalue()
         
         return processed_bytes
         
     except Exception as e:
         raise Exception(f"Image processing failed: {str(e)}")
 
-def call_deepseek_vision_api(image_bytes, prompt_text):
+def call_deepseek_api(image_bytes, prompt_text):
     """
-    Call DeepSeek Vision API with the correct format.
+    Call DeepSeek API with image embedded as Markdown.
+    This is the format that works with DeepSeek.
     """
     if not DEEPSEEK_API_KEY:
-        return "ERROR: No DeepSeek API key found. Please add it to secrets."
+        return "ERROR: No DeepSeek API key found."
     
     # Process image
     try:
@@ -61,24 +68,17 @@ def call_deepseek_vision_api(image_bytes, prompt_text):
         "Content-Type": "application/json"
     }
     
-    # CORRECT FORMAT for DeepSeek vision
+    # Embed image as Markdown in the text content
+    # This is the format that works with DeepSeek
+    image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
+    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    
     payload = {
         "model": "deepseek-chat",
         "messages": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": prompt_text
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
+                "content": full_prompt
             }
         ],
         "max_tokens": 1500,
@@ -88,7 +88,6 @@ def call_deepseek_vision_api(image_bytes, prompt_text):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         
-        # Debug: print status and response for troubleshooting
         if response.status_code != 200:
             return f"ERROR: API returned {response.status_code} - {response.text[:200]}"
         
@@ -96,7 +95,7 @@ def call_deepseek_vision_api(image_bytes, prompt_text):
         return result['choices'][0]['message']['content']
         
     except requests.exceptions.Timeout:
-        return "ERROR: Request timed out. Please try with a smaller image."
+        return "ERROR: Request timed out."
     except requests.exceptions.RequestException as e:
         return f"ERROR: Request failed: {str(e)}"
     except Exception as e:
@@ -104,53 +103,47 @@ def call_deepseek_vision_api(image_bytes, prompt_text):
 
 def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
     """
-    Grade student submission using DeepSeek Vision API.
+    Grade student submission using DeepSeek API.
     """
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grading(question, rubric, total_points)
     
-    # Build prompt - CLEARLY instruct the AI to read the image
-    prompt = f"""You are a teacher. The student's answer is in the IMAGE attached to this message.
-
-**The student's answer is in the IMAGE. Read the image carefully.**
+    # Build prompt
+    prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
 
 **Question:**
 {question}
 
-**Marking Rubric:**
+**Marking Rubric / Expected Answer:**
 {rubric}
 
 **Total Points:** {total_points}
 
-**Instructions:**
-1. Look at the attached image.
-2. Read the student's handwritten or typed answer from the image.
-3. Grade the answer against the rubric.
-4. Award points based on what the student actually wrote.
+**Student's Answer:** (See the image attached. Read and analyze all text from it.)
 
-**Return ONLY valid JSON in this format:**
+Please respond with valid JSON ONLY in the following format:
+
 {{
-    "score": <number between 0 and {total_points}>,
+    "score": <total points awarded out of {total_points}>,
     "feedback": [
         {{
-            "criterion": "<describe which rubric criterion this is>",
-            "points": <points awarded for this criterion>,
-            "reason": "<explain why based on the student's answer>"
+            "mark": "<numeric point value for this criterion>",
+            "rationale": "<detailed explanation of why this mark was awarded or not>"
         }}
     ],
-    "summary": "<brief overall feedback>"
+    "summary": "<general feedback on the student's answer>"
 }}
 
-**CRITICAL:**
-- The student's answer is in the ATTACHED IMAGE.
-- Base your grade ONLY on what you see in the image.
-- Do NOT say you can't read the image - you can.
-- Do NOT quote the rubric as the student's answer.
-- If the student wrote something, grade it.
+Rules:
+- The score must be an integer between 0 and {total_points}.
+- Each criterion from the rubric should have its own row in feedback.
+- The "mark" field should ONLY be a number (e.g., "1", "2", "0").
+- The "rationale" should explain why the student got or didn't get the mark.
+- Base your grading ONLY on what the student actually wrote in the image.
 """
 
     # Call the API
-    response = call_deepseek_vision_api(image_bytes, prompt)
+    response = call_deepseek_api(image_bytes, prompt)
     
     if response.startswith("ERROR:"):
         return 0, [{"mark": "0", "rationale": response}], "API Error"
@@ -185,8 +178,8 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
         if feedback_list:
             for item in feedback_list:
                 table.append({
-                    "mark": str(item.get("points", 0)),
-                    "rationale": item.get("reason", "No reason provided.")
+                    "mark": str(item.get("mark", 0)),
+                    "rationale": item.get("rationale", "No rationale provided.")
                 })
         else:
             table = [{"mark": str(score), "rationale": summary}]
@@ -200,7 +193,6 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
 
 def simulate_grading(question, rubric, total_points):
     """Simulated grading when API is not available."""
-    # Return a reasonable simulated grade
     if total_points >= 3:
         score = 2
         table = [
