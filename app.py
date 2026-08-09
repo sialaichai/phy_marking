@@ -663,7 +663,7 @@ elif auth_type == "class":
                     
                     if camera_image is not None:
                         image_to_submit = camera_image
-                                                # Test button - this tests if the API can read the image
+                        # Test button - this tests if the API can read the image
                         if st.button("🔬 Test Image Reading"):
                             with st.spinner("Testing image reading..."):
                                 img_bytes = image_to_submit.getvalue()
