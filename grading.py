@@ -16,6 +16,9 @@ def process_image_for_api(image_bytes):
         # Open image
         image = Image.open(io.BytesIO(image_bytes))
         
+        # Log image details
+        print(f"Image opened: {image.width}x{image.height}, mode: {image.mode}")
+        
         # Convert to RGB if needed
         if image.mode != 'RGB':
             image = image.convert('RGB')
@@ -24,6 +27,7 @@ def process_image_for_api(image_bytes):
         max_size = 1024
         if image.width > max_size or image.height > max_size:
             image.thumbnail((max_size, max_size), Image.LANCZOS)
+            print(f"Image resized to: {image.width}x{image.height}")
         
         # Save as JPEG
         buffer = io.BytesIO()
@@ -36,15 +40,26 @@ def process_image_for_api(image_bytes):
             image.save(buffer, format='JPEG', quality=50, optimize=True)
             processed_bytes = buffer.getvalue()
         
+        print(f"Image size: {len(processed_bytes)} bytes")
         return processed_bytes
         
     except Exception as e:
+        print(f"Image processing error: {str(e)}")
         raise Exception(f"Image processing failed: {str(e)}")
+
+def test_image_reading(image_bytes):
+    """
+    Test function to verify the image can be read.
+    """
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        return f"✅ Image loaded: {image.width}x{image.height}, mode: {image.mode}"
+    except Exception as e:
+        return f"❌ Image loading failed: {str(e)}"
 
 def call_deepseek_api(image_bytes, prompt_text):
     """
     Call DeepSeek API with image embedded as Markdown.
-    This is the format that works with DeepSeek.
     """
     if not DEEPSEEK_API_KEY:
         return "ERROR: No DeepSeek API key found."
@@ -58,6 +73,7 @@ def call_deepseek_api(image_bytes, prompt_text):
     # Convert to Base64
     try:
         base64_image = base64.b64encode(processed_bytes).decode('utf-8')
+        print(f"Base64 encoding successful. Length: {len(base64_image)}")
     except Exception as e:
         return f"ERROR: Base64 encoding failed: {str(e)}"
     
@@ -69,9 +85,8 @@ def call_deepseek_api(image_bytes, prompt_text):
     }
     
     # Embed image as Markdown in the text content
-    # This is the format that works with DeepSeek
     image_markdown = f"![image](data:image/jpeg;base64,{base64_image})"
-    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image:\n{image_markdown}"
+    full_prompt = f"{prompt_text}\n\nHere is the student's answer as an image. Read the image carefully:\n{image_markdown}"
     
     payload = {
         "model": "deepseek-chat",
@@ -108,38 +123,43 @@ def grade_submission(image_bytes, question, rubric, total_points, use_real_api=T
     if not use_real_api or not DEEPSEEK_API_KEY:
         return simulate_grading(question, rubric, total_points)
     
-    # Build prompt
-    prompt = f"""You are a strict teacher. Grade the student's answer based on the question and rubric.
+    # Build prompt - simpler and more direct
+    prompt = f"""You are a teacher grading a student's answer. The student's answer is in the image attached to this message.
+
+**IMPORTANT: The student's answer is in the IMAGE. Look at the image carefully.**
 
 **Question:**
 {question}
 
-**Marking Rubric / Expected Answer:**
+**Marking Rubric:**
 {rubric}
 
 **Total Points:** {total_points}
 
-**Student's Answer:** (See the image attached. Read and analyze all text from it.)
+**Instructions:**
+1. Look at the attached image.
+2. Read what the student wrote in the image.
+3. Compare it to the rubric.
+4. Award points based on what the student actually wrote.
 
-Please respond with valid JSON ONLY in the following format:
-
+**Return ONLY valid JSON in this format:**
 {{
-    "score": <total points awarded out of {total_points}>,
+    "score": <total points awarded between 0 and {total_points}>,
     "feedback": [
         {{
-            "mark": "<numeric point value for this criterion>",
-            "rationale": "<detailed explanation of why this mark was awarded or not>"
+            "mark": <points for this criterion>,
+            "rationale": "<explain why based on the student's answer>"
         }}
     ],
-    "summary": "<general feedback on the student's answer>"
+    "summary": "<brief overall feedback>"
 }}
 
-Rules:
-- The score must be an integer between 0 and {total_points}.
-- Each criterion from the rubric should have its own row in feedback.
-- The "mark" field should ONLY be a number (e.g., "1", "2", "0").
-- The "rationale" should explain why the student got or didn't get the mark.
-- Base your grading ONLY on what the student actually wrote in the image.
+**CRITICAL RULES:**
+- The student's answer is in the IMAGE.
+- Base your grade ONLY on what you read in the image.
+- If the image contains handwriting, read it and grade it.
+- Do NOT say you can't read the image. You can read images.
+- Be specific about what the student wrote.
 """
 
     # Call the API
