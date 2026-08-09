@@ -6,8 +6,15 @@ import re
 from PIL import Image
 import io
 
-# Get API key from Streamlit secrets
+# ---- Debug: confirm file is loaded (remove after testing) ----
+print("===== grading.py LOADED =====")
+
+# ---- Get API key from Streamlit secrets ----
 DEEPSEEK_API_KEY = st.secrets.get("DEEPSEEK_API_KEY", None)
+
+# ============================================================
+#                    TEST API
+# ============================================================
 
 def test_deepseek_api():
     """Test the DeepSeek API connection with a simple prompt."""
@@ -39,6 +46,10 @@ def test_deepseek_api():
             return f"❌ API error: {response.status_code} - {response.text[:100]}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
+
+# ============================================================
+#                    IMAGE PROCESSING
+# ============================================================
 
 def process_image_for_api(image_bytes):
     """
@@ -73,6 +84,10 @@ def process_image_for_api(image_bytes):
         
     except Exception as e:
         raise Exception(f"Image processing failed: {str(e)}")
+
+# ============================================================
+#                    ANALYZE IMAGE WITH DEEPSEEK
+# ============================================================
 
 def analyze_image_with_deepseek(image_bytes, prompt_text):
     """
@@ -149,11 +164,20 @@ def analyze_image_with_deepseek(image_bytes, prompt_text):
     except (KeyError, IndexError) as e:
         return f"ERROR: Unexpected API response structure: {str(e)}"
 
-def grade_student_submission(image_bytes, question, rubric, total_points):
+# ============================================================
+#                    GRADE SUBMISSION (MAIN)
+# ============================================================
+
+def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
     """
     Grade a student's answer using DeepSeek API with clean numeric marks.
+    This is the main function called from app.py.
     """
-    # Construct grading prompt with CLEAR SEPARATION between rubric and student work
+    # If API is disabled or key missing, use simulation
+    if not use_real_api or not DEEPSEEK_API_KEY:
+        return simulate_grade(question, rubric, "", total_points)
+    
+    # Construct grading prompt with clear separation
     prompt = f"""You are a strict teacher. Grade the student's answer based ONLY on the rubric provided.
 
 **IMPORTANT - READ CAREFULLY:**
@@ -197,12 +221,6 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
 - The "rationale" should reference specific things the student actually wrote in the image.
 - If the student wrote something that matches the rubric, award the points and quote what they wrote.
 - If the student didn't write something, explain what was missing.
-
-**Example of correct rationale:**
-"Student wrote 'F=ma' which matches the rubric. Awarded 1 point."
-
-**Example of WRONG rationale (DO NOT DO THIS):**
-"The rubric says 'State F=ma' so they get 1 point." - This is wrong because it quotes the rubric instead of the student.
 """
 
     # Call API
@@ -290,7 +308,10 @@ def grade_student_submission(image_bytes, question, rubric, total_points):
     except Exception as e:
         return 0, [{"mark": 0, "rationale": f"Unexpected error: {str(e)}"}], f"Error: {str(e)}"
 
-# ---- Fallback: Simulated grading with table ----
+# ============================================================
+#                    SIMULATED GRADE (FALLBACK)
+# ============================================================
+
 def simulate_grade(question, rubric, student_answer, total_points):
     """Placeholder grading when DeepSeek API is not available."""
     # Extract keywords from rubric
@@ -309,13 +330,11 @@ def simulate_grade(question, rubric, student_answer, total_points):
     overall_feedback = f"Simulated grading: found {found} of {len(keywords)} keywords."
     return score, feedback_table, overall_feedback
 
-# ---- Main entry point ----
-def grade_submission(image_bytes, question, rubric, total_points, use_real_api=True):
-    """
-    Main grading function - tries real API first, falls back to simulation.
-    """
-    if use_real_api and DEEPSEEK_API_KEY:
-        return grade_student_submission(image_bytes, question, rubric, total_points)
-    else:
-        transcribed = "Dummy OCR text for simulation."
-        return simulate_grade(question, rubric, transcribed, total_points)
+# ============================================================
+#                    LEGACY / ALIAS
+# ============================================================
+
+# For backward compatibility, ensure grade_work also exists
+def grade_work(image_bytes, question, rubric, total_points, use_real_api=True):
+    """Alias for grade_submission (for compatibility with older app versions)."""
+    return grade_submission(image_bytes, question, rubric, total_points, use_real_api)
